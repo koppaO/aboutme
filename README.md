@@ -6,7 +6,7 @@
 
 ## Локально
 
-Нужен Python 3.12+.
+Python 3.12+.
 
 ```bash
 python3 -m venv .venv
@@ -28,7 +28,7 @@ curl http://localhost:8080/projects
 
 ## Docker Compose
 
-Postgres наружу не публикуется. Пароль БД только в `.env` — файл в `.gitignore`, на GitHub не попадает.
+Postgres наружу не публикуется, только docker-сеть.
 
 ```bash
 cp .env.example .env
