@@ -33,7 +33,7 @@ curl http://localhost:8080/api/me
 curl http://localhost:8080/api/projects
 ```
 
-Текст о себе и список проектов лежат в `content/*.json`. API читает файлы с диска: правка JSON меняет ответ без пересборки.
+Текст о себе и список проектов лежат в `content/*.json`. В Compose папка смонтирована в api: правка JSON сразу видна в `/api/me` и `/api/projects` (обнови страницу в браузере).
 
 ## Docker Compose
 

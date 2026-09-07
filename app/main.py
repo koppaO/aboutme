@@ -1,11 +1,12 @@
-from typing import Any
-
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 
 from app.content import load
 from app.db import database_status
 
 app = FastAPI(title="aboutme")
+
+NO_STORE = {"Cache-Control": "no-store"}
 
 
 @app.get("/health")
@@ -21,10 +22,10 @@ def health() -> dict[str, str]:
 
 
 @app.get("/me")
-def me() -> dict[str, Any]:
-    return load("about.json")
+def me() -> JSONResponse:
+    return JSONResponse(load("about.json"), headers=NO_STORE)
 
 
 @app.get("/projects")
-def projects() -> dict[str, Any]:
-    return load("projects.json")
+def projects() -> JSONResponse:
+    return JSONResponse(load("projects.json"), headers=NO_STORE)

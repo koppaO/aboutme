@@ -18,6 +18,8 @@ services:
     environment:
       PORT: "8080"
       POSTGRES_HOST: postgres
+    volumes:
+      - ./content:/app/content:ro
     healthcheck:
       test:
         [
