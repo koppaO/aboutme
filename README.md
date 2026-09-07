@@ -28,12 +28,15 @@ curl http://localhost:8080/projects
 
 ## Docker Compose
 
-Postgres наружу не публикуется, только docker-сеть. Скопируй env и подними сервисы:
+Postgres наружу не публикуется. Пароль БД не в compose и не в git: только файл
+`secrets/postgres_password` (в образ не копируется, монтируется как Docker secret).
 
 ```bash
-cp .env.example .env
+cp secrets/postgres_password.example secrets/postgres_password
+# подставь свой пароль в этот файл, не коммить его
 docker compose up --build
 ```
 
 Проверка: `curl http://localhost:8080/health` → `{"status":"ok","database":"ok"}`.
+`docker compose config` не должен печатать пароль.
 Остановка: `docker compose down`.

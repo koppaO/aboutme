@@ -5,7 +5,12 @@ services:
       - "8080:8080"
     environment:
       PORT: "8080"
-      DATABASE_URL: postgresql://aboutme:${POSTGRES_PASSWORD}@postgres:5432/aboutme
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: aboutme
+      POSTGRES_DB: aboutme
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
     depends_on:
       postgres:
         condition: service_healthy
@@ -15,8 +20,10 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: aboutme
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: aboutme
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -25,6 +32,10 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
 
 volumes:
   pgdata:

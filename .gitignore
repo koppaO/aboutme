@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+secrets/postgres_password
 bin/
 dist/
 *.exe
