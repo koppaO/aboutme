@@ -21,3 +21,11 @@ def test_health_db_unavailable(monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://aboutme:x@127.0.0.1:1/aboutme")
     response = client.get("/health")
     assert response.status_code == 503
+
+
+def test_health_skips_db_without_credentials(monkeypatch) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
