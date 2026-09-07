@@ -6,7 +6,7 @@
 
 ## Локально
 
-Нужен Python 3.12+.
+Python 3.12+.
 
 ```bash
 python3 -m venv .venv
@@ -28,7 +28,7 @@ curl http://localhost:8080/projects
 
 ## Docker Compose
 
-Postgres наружу не публикуется, только docker-сеть. Скопируй env и подними сервисы:
+Postgres наружу не публикуется, только docker-сеть.
 
 ```bash
 cp .env.example .env
