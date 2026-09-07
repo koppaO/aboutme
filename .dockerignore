@@ -6,7 +6,6 @@ __pycache__
 .pytest_cache
 .python-version
 .env
-secrets/
 *.md
 tests
 pytest.ini

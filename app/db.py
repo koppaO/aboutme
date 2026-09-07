@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 from urllib.parse import quote_plus
 
 import psycopg
@@ -9,11 +8,10 @@ def _database_url() -> str | None:
     if url := os.getenv("DATABASE_URL"):
         return url
 
-    password_file = os.getenv("POSTGRES_PASSWORD_FILE")
-    if not password_file:
+    password = os.getenv("POSTGRES_PASSWORD")
+    if not password:
         return None
 
-    password = Path(password_file).read_text(encoding="utf-8").strip()
     user = os.environ["POSTGRES_USER"]
     dbname = os.environ["POSTGRES_DB"]
     host = os.getenv("POSTGRES_HOST", "postgres")

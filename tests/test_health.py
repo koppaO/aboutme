@@ -23,9 +23,9 @@ def test_health_db_unavailable(monkeypatch) -> None:
     assert response.status_code == 503
 
 
-def test_health_skips_db_without_url_or_secret(monkeypatch) -> None:
+def test_health_skips_db_without_credentials(monkeypatch) -> None:
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    monkeypatch.delenv("POSTGRES_PASSWORD_FILE", raising=False)
+    monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
