@@ -25,3 +25,15 @@ curl http://localhost:8080/projects
 ```
 
 Текст о себе и список проектов лежат в `content/*.json`. API читает файлы с диска: правка JSON меняет ответ без пересборки.
+
+## Docker Compose
+
+Postgres наружу не публикуется, только docker-сеть. Скопируй env и подними сервисы:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+Проверка: `curl http://localhost:8080/health` → `{"status":"ok","database":"ok"}`.
+Остановка: `docker compose down`.
