@@ -6,3 +6,9 @@ dist/
 *.exe
 *.test
 coverage.out
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.python-version
