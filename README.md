@@ -45,6 +45,6 @@ docker compose up --build
 ```
 
 Проверка: `curl http://localhost:8080/api/health` → `{"status":"ok","database":"ok"}`.
-В браузере: `http://localhost:8080/` — заглушка, ссылки на API.
+В браузере: `http://localhost:8080/` — страница читает `/api/me` и `/api/projects`.
 Наружу открыт только nginx (`8080`). API и Postgres — docker-сеть.
 Остановка: `docker compose down`.

@@ -1,0 +1,130 @@
+:root {
+  --bg: #f3efe6;
+  --text: #141414;
+  --muted: #5a574e;
+  --line: #d6d0c4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+  line-height: 1.5;
+}
+
+main {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+
+#status {
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
+  font-size: 0.85rem;
+  color: #8a1f1f;
+}
+
+header {
+  margin-bottom: 3rem;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(2.75rem, 12vw, 6rem);
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  line-height: 0.95;
+}
+
+#headline {
+  margin: 1rem 0 0;
+  color: var(--muted);
+  font-size: 1.05rem;
+}
+
+#socials {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin-top: 1.25rem;
+}
+
+h2 {
+  margin: 0 0 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+section + section {
+  margin-top: 2.5rem;
+}
+
+#about {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+#projects {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#projects li {
+  padding: 1rem 0;
+  border-top: 1px solid var(--line);
+}
+
+#projects li:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+#projects h3 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+#projects p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+}
+
+.stack,
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  margin-top: 0.6rem;
+  padding: 0;
+  list-style: none;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.8rem;
+}
+
+.stack span {
+  color: var(--muted);
+}
+
+a {
+  color: inherit;
+  text-underline-offset: 0.18em;
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
