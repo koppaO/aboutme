@@ -33,7 +33,7 @@ curl http://localhost:8080/api/me
 curl http://localhost:8080/api/projects
 ```
 
-Текст о себе и список проектов лежат в `content/*.json`. API читает файлы с диска: правка JSON меняет ответ без пересборки.
+Текст о себе и список проектов лежат в `content/*.json`. В Compose папка смонтирована в api: правка JSON сразу видна в `/api/me` и `/api/projects` (обнови страницу в браузере).
 
 ## Docker Compose
 
@@ -45,6 +45,6 @@ docker compose up --build
 ```
 
 Проверка: `curl http://localhost:8080/api/health` → `{"status":"ok","database":"ok"}`.
-В браузере: `http://localhost:8080/` — заглушка, ссылки на API.
+В браузере: `http://localhost:8080/` — страница читает `/api/me` и `/api/projects`.
 Наружу открыт только nginx (`8080`). API и Postgres — docker-сеть.
 Остановка: `docker compose down`.

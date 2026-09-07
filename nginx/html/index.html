@@ -4,14 +4,25 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>aboutme</title>
+    <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <h1>aboutme</h1>
-    <p>Заглушка фронта. API за nginx:</p>
-    <ul>
-      <li><a href="/api/health">/api/health</a></li>
-      <li><a href="/api/me">/api/me</a></li>
-      <li><a href="/api/projects">/api/projects</a></li>
-    </ul>
+    <main>
+      <p id="status" hidden></p>
+      <header>
+        <h1 id="name"></h1>
+        <p id="headline"></p>
+        <nav id="socials"></nav>
+      </header>
+      <section id="about-section" hidden>
+        <h2>О себе</h2>
+        <p id="about"></p>
+      </section>
+      <section id="projects-section" hidden>
+        <h2>Проекты</h2>
+        <ul id="projects"></ul>
+      </section>
+    </main>
+    <script src="/app.js"></script>
   </body>
 </html>
