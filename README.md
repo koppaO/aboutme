@@ -24,6 +24,15 @@ curl http://localhost:8080/me
 curl http://localhost:8080/projects
 ```
 
+С Docker Compose те же ручки с префиксом `/api` (nginx проксирует на FastAPI):
+
+```bash
+curl http://localhost:8080/
+curl http://localhost:8080/api/health
+curl http://localhost:8080/api/me
+curl http://localhost:8080/api/projects
+```
+
 Текст о себе и список проектов лежат в `content/*.json`. API читает файлы с диска: правка JSON меняет ответ без пересборки.
 
 ## Docker Compose
@@ -35,5 +44,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Проверка: `curl http://localhost:8080/health` → `{"status":"ok","database":"ok"}`.
+Проверка: `curl http://localhost:8080/api/health` → `{"status":"ok","database":"ok"}`.
+В браузере: `http://localhost:8080/` — заглушка, ссылки на API.
+Наружу открыт только nginx (`8080`). API и Postgres — docker-сеть.
 Остановка: `docker compose down`.
