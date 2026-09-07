@@ -16,4 +16,12 @@ pytest
 uvicorn app.main:app --reload --port 8080
 ```
 
-Проверка: `curl http://localhost:8080/health` → `{"status":"ok"}`.
+Проверка:
+
+```bash
+curl http://localhost:8080/health
+curl http://localhost:8080/me
+curl http://localhost:8080/projects
+```
+
+Текст о себе и список проектов лежат в `content/*.json`. API читает файлы с диска: правка JSON меняет ответ без пересборки.

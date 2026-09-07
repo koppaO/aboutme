@@ -1,0 +1,16 @@
+{
+  "projects": [
+    {
+      "slug": "aboutme",
+      "title": "aboutme",
+      "description": "Личный сайт: описание, пет-проекты, ссылки. Backend на FastAPI, фронт за nginx.",
+      "stack": ["FastAPI", "nginx", "Postgres", "Docker"],
+      "links": [
+        {
+          "name": "GitHub",
+          "url": "https://github.com/koppaO/aboutme"
+        }
+      ]
+    }
+  ]
+}
