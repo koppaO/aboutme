@@ -1,12 +1,3 @@
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
 function showStatus(message) {
   const el = document.getElementById("status");
   el.hidden = false;
@@ -19,6 +10,17 @@ async function loadJson(path) {
     throw new Error(`${path}: ${response.status}`);
   }
   return response.json();
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) {
+    node.className = className;
+  }
+  if (text != null) {
+    node.textContent = text;
+  }
+  return node;
 }
 
 function renderMe(me) {
@@ -36,9 +38,8 @@ function renderMe(me) {
   const socials = document.getElementById("socials");
   socials.replaceChildren();
   for (const item of me.socials || []) {
-    const a = document.createElement("a");
+    const a = el("a", null, item.name);
     a.href = item.url;
-    a.textContent = item.name;
     a.rel = "me noopener noreferrer";
     a.target = "_blank";
     socials.append(a);
@@ -55,23 +56,37 @@ function renderProjects(payload) {
 
   list.replaceChildren();
   for (const project of projects) {
-    const li = document.createElement("li");
-    const links = (project.links || [])
-      .map(
-        (link) =>
-          `<li><a href="${escapeHtml(link.url)}" rel="noopener noreferrer" target="_blank">${escapeHtml(link.name)}</a></li>`,
-      )
-      .join("");
-    const stack = (project.stack || [])
-      .map((item) => `<span>${escapeHtml(item)}</span>`)
-      .join("");
+    const li = el("li");
+    const top = el("div", "project-top");
+    top.append(el("h3", null, project.title || project.slug || "project"));
+    li.append(top);
 
-    li.innerHTML = `
-      <h3>${escapeHtml(project.title)}</h3>
-      <p>${escapeHtml(project.description || "")}</p>
-      ${stack ? `<p class="stack">${stack}</p>` : ""}
-      ${links ? `<ul class="links">${links}</ul>` : ""}
-    `;
+    if (project.description) {
+      li.append(el("p", "desc", project.description));
+    }
+
+    if (project.stack?.length) {
+      const stack = el("p", "stack");
+      for (const item of project.stack) {
+        stack.append(el("span", null, item));
+      }
+      li.append(stack);
+    }
+
+    if (project.links?.length) {
+      const links = el("ul", "links");
+      for (const link of project.links) {
+        const item = el("li");
+        const a = el("a", null, link.name);
+        a.href = link.url;
+        a.rel = "noopener noreferrer";
+        a.target = "_blank";
+        item.append(a);
+        links.append(item);
+      }
+      li.append(links);
+    }
+
     list.append(li);
   }
   section.hidden = false;
@@ -88,6 +103,8 @@ async function main() {
   } catch (err) {
     showStatus("Не удалось загрузить данные с API.");
     console.error(err);
+  } finally {
+    document.body.classList.remove("is-loading");
   }
 }
 
