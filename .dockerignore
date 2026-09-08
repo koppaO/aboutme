@@ -7,5 +7,3 @@ __pycache__
 .python-version
 .env
 *.md
-tests
-pytest.ini

@@ -5,6 +5,12 @@ from app.main import app
 client = TestClient(app)
 
 
+def test_docs_are_disabled() -> None:
+    assert client.get("/docs").status_code == 404
+    assert client.get("/redoc").status_code == 404
+    assert client.get("/openapi.json").status_code == 404
+
+
 def test_health_ok() -> None:
     response = client.get("/health")
     assert response.status_code == 200
