@@ -7,26 +7,73 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body class="is-loading">
-    <div class="frame">
+    <div class="sheet">
+      <span class="crop tl" aria-hidden="true"></span>
+      <span class="crop tr" aria-hidden="true"></span>
+      <span class="crop bl" aria-hidden="true"></span>
+      <span class="crop br" aria-hidden="true"></span>
+
+      <header class="meta">
+        <p class="kicker">dwg · aboutme</p>
+        <p id="health" class="health">health · checking</p>
+      </header>
+
       <p id="status" hidden></p>
+
       <header class="hero">
-        <div>
-          <p class="kicker">aboutme</p>
-          <h1 id="name"></h1>
-          <p id="headline"></p>
-        </div>
+        <h1 id="name"></h1>
+        <p id="headline"></p>
         <nav id="socials"></nav>
       </header>
-      <section id="about-section" hidden>
-        <h2>О себе</h2>
-        <p id="about"></p>
-      </section>
+
+      <div class="mid">
+        <section id="about-section" hidden>
+          <h2>spec · о себе</h2>
+          <p id="about"></p>
+        </section>
+
+        <aside class="stamp" aria-label="Штамп чертежа">
+          <p class="stamp-title">title block</p>
+          <dl>
+            <div>
+              <dt>owner</dt>
+              <dd id="tb-owner">—</dd>
+            </div>
+            <div>
+              <dt>rev</dt>
+              <dd>local</dd>
+            </div>
+            <div>
+              <dt>units</dt>
+              <dd>nginx · api · pg</dd>
+            </div>
+            <div>
+              <dt>health</dt>
+              <dd id="tb-health">—</dd>
+            </div>
+          </dl>
+        </aside>
+      </div>
+
       <section id="projects-section" hidden>
-        <h2>Проекты</h2>
-        <ul id="projects"></ul>
+        <h2>bom · стенды</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>unit</th>
+                <th>role</th>
+                <th>stack</th>
+                <th>ref</th>
+              </tr>
+            </thead>
+            <tbody id="projects"></tbody>
+          </table>
+        </div>
       </section>
+
       <footer>
-        <p>Данные с собственного API · nginx + FastAPI</p>
+        <p>this host · compose · secrets not in git</p>
       </footer>
     </div>
     <script src="/app.js"></script>
