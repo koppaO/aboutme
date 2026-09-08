@@ -6,12 +6,15 @@
     <title>aboutme</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
-    <main>
+  <body class="is-loading">
+    <div class="frame">
       <p id="status" hidden></p>
-      <header>
-        <h1 id="name"></h1>
-        <p id="headline"></p>
+      <header class="hero">
+        <div>
+          <p class="kicker">aboutme</p>
+          <h1 id="name"></h1>
+          <p id="headline"></p>
+        </div>
         <nav id="socials"></nav>
       </header>
       <section id="about-section" hidden>
@@ -22,7 +25,10 @@
         <h2>Проекты</h2>
         <ul id="projects"></ul>
       </section>
-    </main>
+      <footer>
+        <p>Данные с собственного API · nginx + FastAPI</p>
+      </footer>
+    </div>
     <script src="/app.js"></script>
   </body>
 </html>
