@@ -12,3 +12,4 @@ __pycache__/
 .pytest_cache/
 *.py[cod]
 .python-version
+nginx/certbot-www/.well-known/
