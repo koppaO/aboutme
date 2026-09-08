@@ -63,7 +63,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            cd ~/aboutme
+            cd ~/app/aboutme
             git fetch origin
             git checkout main
             git pull origin main
