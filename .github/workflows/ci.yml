@@ -50,3 +50,21 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  
+  deploy:
+  if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  needs: [test-and-build, gitleaks]
+  runs-on: ubuntu-latest
+  steps:
+    - name: Deploy to VPS
+      uses: appleboy/ssh-action@v1.2.2
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        script: |
+          cd ~/aboutme
+          git fetch origin
+          git checkout main
+          git pull origin main
+          docker compose up -d --build
