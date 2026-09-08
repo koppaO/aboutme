@@ -4,7 +4,12 @@ from fastapi.responses import JSONResponse
 from app.content import load
 from app.db import database_status
 
-app = FastAPI(title="aboutme")
+app = FastAPI(
+    title="aboutme",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 NO_STORE = {"Cache-Control": "no-store"}
 
