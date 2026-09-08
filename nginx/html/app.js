@@ -23,40 +23,29 @@ function el(tag, className, text) {
   return node;
 }
 
-function renderName(name) {
-  const h1 = document.getElementById("name");
-  h1.replaceChildren();
-  const parts = name.match(/^(.*?)([A-Z0-9])$/);
-  if (parts && parts[1]) {
-    h1.append(el("span", "given", parts[1]));
-    h1.append(el("span", "mark", parts[2]));
-  } else {
-    h1.textContent = name;
-  }
-}
-
 function renderHealth(payload, ok) {
   const line = document.getElementById("health");
-  const stamp = document.getElementById("tb-health");
   if (!ok || !payload) {
-    line.textContent = "health · api down";
+    line.textContent = "API сейчас недоступен";
     line.classList.add("is-down");
-    stamp.textContent = "api down";
     return;
   }
-  const api = payload.status === "ok" ? "ok" : payload.status || "fail";
-  const db = payload.database || "—";
-  line.textContent = `health · api ${api} · pg ${db}`;
-  line.classList.toggle("is-down", api !== "ok" || db !== "ok");
-  stamp.textContent = `api ${api} · pg ${db}`;
+  const api = payload.status === "ok";
+  const db = payload.database === "ok";
+  if (api && db) {
+    line.textContent = "Сервисы в порядке";
+    line.classList.remove("is-down");
+    return;
+  }
+  line.textContent = `API: ${payload.status || "нет"} · база: ${payload.database || "нет"}`;
+  line.classList.add("is-down");
 }
 
 function renderMe(me) {
   const name = me.name || "";
   document.title = name || "aboutme";
-  renderName(name);
+  document.getElementById("name").textContent = name;
   document.getElementById("headline").textContent = me.headline || "";
-  document.getElementById("tb-owner").textContent = name || "—";
 
   const about = document.getElementById("about");
   const aboutSection = document.getElementById("about-section");
@@ -86,32 +75,36 @@ function renderProjects(payload) {
 
   list.replaceChildren();
   for (const project of projects) {
-    const tr = el("tr");
-    tr.append(el("td", "unit", project.title || project.slug || "unit"));
-    tr.append(el("td", "role", project.description || ""));
+    const li = el("li");
+    li.append(el("h3", null, project.title || project.slug || "проект"));
 
-    const stackCell = el("td");
-    const stack = el("p", "stack");
-    for (const item of project.stack || []) {
-      stack.append(el("span", null, item));
+    if (project.description) {
+      li.append(el("p", "desc", project.description));
     }
-    stackCell.append(stack);
-    tr.append(stackCell);
 
-    const refCell = el("td");
-    const refs = el("ul", "refs");
-    for (const link of project.links || []) {
-      const item = el("li");
-      const a = el("a", null, link.name);
-      a.href = link.url;
-      a.rel = "noopener noreferrer";
-      a.target = "_blank";
-      item.append(a);
-      refs.append(item);
+    if (project.stack?.length) {
+      const stack = el("p", "stack");
+      for (const item of project.stack) {
+        stack.append(el("span", null, item));
+      }
+      li.append(stack);
     }
-    refCell.append(refs);
-    tr.append(refCell);
-    list.append(tr);
+
+    if (project.links?.length) {
+      const links = el("ul", "links");
+      for (const link of project.links) {
+        const item = el("li");
+        const a = el("a", null, link.name);
+        a.href = link.url;
+        a.rel = "noopener noreferrer";
+        a.target = "_blank";
+        item.append(a);
+        links.append(item);
+      }
+      li.append(links);
+    }
+
+    list.append(li);
   }
   section.hidden = false;
 }
