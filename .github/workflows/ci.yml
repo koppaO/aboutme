@@ -49,6 +49,7 @@ jobs:
     permissions:
       contents: read
       actions: write
+      security-events: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -80,22 +81,40 @@ jobs:
           ignore-unfixed: true
           exit-code: "0"
 
-      - name: Show findings and fail on HIGH/CRITICAL
+      - name: Write Trivy SARIF
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: aboutme:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          scanners: vuln
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          limit-severities-for-sarif: true
+          exit-code: "0"
+          skip-setup-trivy: true
+
+      - name: Publish Trivy findings
+        if: always()
         env:
           IMAGE_REF: aboutme:${{ github.sha }}
         run: |
           python3 <<'PY'
-          import html
           import json
           import os
           import sys
           from pathlib import Path
 
+          def cell(value):
+              return str(value or "").replace("|", "\\|").replace("\n", " ")
+
           image = os.environ.get("IMAGE_REF", "")
           data = json.loads(Path("trivy-report.json").read_text(encoding="utf-8"))
           rows = []
           for result in data.get("Results") or []:
-              target = result.get("Target") or ""
               for vuln in result.get("Vulnerabilities") or []:
                   rows.append(
                       {
@@ -105,11 +124,16 @@ jobs:
                           "fixed": vuln.get("FixedVersion") or "-",
                           "cve": vuln.get("VulnerabilityID") or "",
                           "title": vuln.get("Title") or "",
-                          "target": target,
                       }
                   )
 
-          rows.sort(key=lambda row: ({"CRITICAL": 0, "HIGH": 1}.get(row["severity"], 9), row["pkg"], row["cve"]))
+          rows.sort(
+              key=lambda row: (
+                  {"CRITICAL": 0, "HIGH": 1}.get(row["severity"], 9),
+                  row["pkg"],
+                  row["cve"],
+              )
+          )
           counts = {"CRITICAL": 0, "HIGH": 0}
           for row in rows:
               if row["severity"] in counts:
@@ -119,76 +143,66 @@ jobs:
               summary = "{} CRITICAL, {} HIGH (fix available)".format(
                   counts["CRITICAL"], counts["HIGH"]
               )
-              lines = [
-                  "Image: {}".format(image),
-                  summary,
-                  "",
-                  "{:<10} {:<28} {:<18} {:<18} {}".format(
-                      "SEV", "PACKAGE", "INSTALLED", "FIXED", "ID"
-                  ),
-              ]
-              for row in rows:
-                  lines.append(
-                      "{:<10} {:<28} {:<18} {:<18} {}".format(
-                          row["severity"],
-                          row["pkg"],
-                          row["installed"],
-                          row["fixed"],
-                          row["cve"],
-                      )
-                  )
-              text = "\n".join(lines)
           else:
               summary = "No HIGH/CRITICAL findings."
-              text = "Image: {}\n{}".format(image, summary)
 
-          table_rows = []
-          for row in rows:
-              table_rows.append(
-                  "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
-                      html.escape(row["severity"]),
-                      html.escape(row["pkg"]),
-                      html.escape(row["installed"]),
-                      html.escape(row["fixed"]),
-                      html.escape(row["cve"]),
-                      html.escape(row["title"]),
+          md = [
+              "## Trivy image scan",
+              "",
+              "Image: `{}`".format(image),
+              "",
+              summary,
+              "",
+          ]
+          if rows:
+              md += [
+                  "| Severity | Package | Installed | Fixed | ID | Title |",
+                  "| --- | --- | --- | --- | --- | --- |",
+              ]
+              for row in rows:
+                  md.append(
+                      "| {} | {} | {} | {} | {} | {} |".format(
+                          cell(row["severity"]),
+                          cell(row["pkg"]),
+                          cell(row["installed"]),
+                          cell(row["fixed"]),
+                          cell(row["cve"]),
+                          cell(row["title"]),
+                      )
                   )
-              )
-          page = (
-              "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
-              "<title>Trivy scan</title>"
-              "<style>body{font-family:sans-serif;margin:24px}"
-              "table{border-collapse:collapse;width:100%}"
-              "th,td{border:1px solid #ccc;padding:6px 8px;text-align:left}"
-              "th{background:#f4f4f4}</style></head><body>"
-              "<h1>Trivy image scan</h1>"
-              "<p><b>Image:</b> "
-              + html.escape(image)
-              + "</p><p><b>Result:</b> "
-              + html.escape(summary)
-              + "</p><table><tr><th>Severity</th><th>Package</th>"
-              "<th>Installed</th><th>Fixed</th><th>ID</th><th>Title</th></tr>"
-              + ("\n".join(table_rows) if table_rows else "<tr><td colspan='6'>No findings</td></tr>")
-              + "</table></body></html>"
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(
+              "\n".join(md) + "\n", encoding="utf-8"
           )
 
-          Path("trivy-report.txt").write_text(text + "\n", encoding="utf-8")
-          Path("trivy-report.html").write_text(page, encoding="utf-8")
-          print(text)
-          sys.exit(1 if rows else 0)
+          for row in rows:
+              message = "{} {} {} -> {}".format(
+                  row["cve"], row["pkg"], row["installed"], row["fixed"]
+              )
+              if row["severity"] == "CRITICAL":
+                  print("::error title=Trivy CRITICAL::{}".format(message))
+              elif row["severity"] == "HIGH":
+                  print("::warning title=Trivy HIGH::{}".format(message))
+
+          print(summary)
+          for row in rows:
+              print(
+                  "{:<10} {:<28} {:<18} {:<18} {}".format(
+                      row["severity"],
+                      row["pkg"],
+                      row["installed"],
+                      row["fixed"],
+                      row["cve"],
+                  )
+              )
+          sys.exit(1 if counts["CRITICAL"] else 0)
           PY
 
-      - name: Upload Trivy report
+      - name: Upload Trivy SARIF
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: github/codeql-action/upload-sarif@v3
         with:
-          name: trivy-scan-report
-          path: |
-            trivy-report.html
-            trivy-report.txt
-            trivy-report.json
-          retention-days: 30
-          if-no-files-found: error
+          sarif_file: trivy-results.sarif
+          category: trivy
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
