@@ -23,6 +23,8 @@ jobs:
 
       - name: Build image and run tests
         uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
           target: test
@@ -56,6 +58,8 @@ jobs:
 
       - name: Build production image
         uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
           load: true
@@ -77,39 +81,99 @@ jobs:
           exit-code: "0"
 
       - name: Show findings and fail on HIGH/CRITICAL
+        env:
+          IMAGE_REF: aboutme:${{ github.sha }}
         run: |
           python3 <<'PY'
+          import html
           import json
+          import os
           import sys
           from pathlib import Path
 
+          image = os.environ.get("IMAGE_REF", "")
           data = json.loads(Path("trivy-report.json").read_text(encoding="utf-8"))
           rows = []
           for result in data.get("Results") or []:
+              target = result.get("Target") or ""
               for vuln in result.get("Vulnerabilities") or []:
                   rows.append(
-                      (
-                          vuln.get("Severity") or "",
-                          vuln.get("PkgName") or "",
-                          vuln.get("InstalledVersion") or "",
-                          vuln.get("FixedVersion") or "-",
-                          vuln.get("VulnerabilityID") or "",
-                      )
+                      {
+                          "severity": vuln.get("Severity") or "",
+                          "pkg": vuln.get("PkgName") or "",
+                          "installed": vuln.get("InstalledVersion") or "",
+                          "fixed": vuln.get("FixedVersion") or "-",
+                          "cve": vuln.get("VulnerabilityID") or "",
+                          "title": vuln.get("Title") or "",
+                          "target": target,
+                      }
                   )
 
-          header = "{:<10} {:<28} {:<18} {:<18} {}".format(
-              "SEV", "PACKAGE", "INSTALLED", "FIXED", "ID"
-          )
+          rows.sort(key=lambda row: ({"CRITICAL": 0, "HIGH": 1}.get(row["severity"], 9), row["pkg"], row["cve"]))
+          counts = {"CRITICAL": 0, "HIGH": 0}
+          for row in rows:
+              if row["severity"] in counts:
+                  counts[row["severity"]] += 1
+
           if rows:
-              body = "\n".join(
-                  "{:<10} {:<28} {:<18} {:<18} {}".format(*row) for row in rows
+              summary = "{} CRITICAL, {} HIGH (fix available)".format(
+                  counts["CRITICAL"], counts["HIGH"]
               )
-              text = "{}\n{}\n\n{} finding(s) with a fix available.".format(
-                  header, body, len(rows)
-              )
+              lines = [
+                  "Image: {}".format(image),
+                  summary,
+                  "",
+                  "{:<10} {:<28} {:<18} {:<18} {}".format(
+                      "SEV", "PACKAGE", "INSTALLED", "FIXED", "ID"
+                  ),
+              ]
+              for row in rows:
+                  lines.append(
+                      "{:<10} {:<28} {:<18} {:<18} {}".format(
+                          row["severity"],
+                          row["pkg"],
+                          row["installed"],
+                          row["fixed"],
+                          row["cve"],
+                      )
+                  )
+              text = "\n".join(lines)
           else:
-              text = "No HIGH/CRITICAL findings."
+              summary = "No HIGH/CRITICAL findings."
+              text = "Image: {}\n{}".format(image, summary)
+
+          table_rows = []
+          for row in rows:
+              table_rows.append(
+                  "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+                      html.escape(row["severity"]),
+                      html.escape(row["pkg"]),
+                      html.escape(row["installed"]),
+                      html.escape(row["fixed"]),
+                      html.escape(row["cve"]),
+                      html.escape(row["title"]),
+                  )
+              )
+          page = (
+              "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+              "<title>Trivy scan</title>"
+              "<style>body{font-family:sans-serif;margin:24px}"
+              "table{border-collapse:collapse;width:100%}"
+              "th,td{border:1px solid #ccc;padding:6px 8px;text-align:left}"
+              "th{background:#f4f4f4}</style></head><body>"
+              "<h1>Trivy image scan</h1>"
+              "<p><b>Image:</b> "
+              + html.escape(image)
+              + "</p><p><b>Result:</b> "
+              + html.escape(summary)
+              + "</p><table><tr><th>Severity</th><th>Package</th>"
+              "<th>Installed</th><th>Fixed</th><th>ID</th><th>Title</th></tr>"
+              + ("\n".join(table_rows) if table_rows else "<tr><td colspan='6'>No findings</td></tr>")
+              + "</table></body></html>"
+          )
+
           Path("trivy-report.txt").write_text(text + "\n", encoding="utf-8")
+          Path("trivy-report.html").write_text(page, encoding="utf-8")
           print(text)
           sys.exit(1 if rows else 0)
           PY
@@ -118,10 +182,11 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-report
+          name: trivy-scan-report
           path: |
-            trivy-report.json
+            trivy-report.html
             trivy-report.txt
+            trivy-report.json
           retention-days: 30
           if-no-files-found: error
 
