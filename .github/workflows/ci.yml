@@ -63,30 +63,56 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Write Trivy JSON report
+      - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: aboutme:${{ github.sha }}
           format: json
           output: trivy-report.json
+          scanners: vuln
           vuln-type: os,library
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "0"
 
-      - name: Fail on HIGH and CRITICAL
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: image
-          image-ref: aboutme:${{ github.sha }}
-          format: table
-          output: trivy-report.txt
-          vuln-type: os,library
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: "1"
-          skip-setup-trivy: true
+      - name: Show findings and fail on HIGH/CRITICAL
+        run: |
+          python3 <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          data = json.loads(Path("trivy-report.json").read_text(encoding="utf-8"))
+          rows = []
+          for result in data.get("Results") or []:
+              for vuln in result.get("Vulnerabilities") or []:
+                  rows.append(
+                      (
+                          vuln.get("Severity") or "",
+                          vuln.get("PkgName") or "",
+                          vuln.get("InstalledVersion") or "",
+                          vuln.get("FixedVersion") or "-",
+                          vuln.get("VulnerabilityID") or "",
+                      )
+                  )
+
+          header = "{:<10} {:<28} {:<18} {:<18} {}".format(
+              "SEV", "PACKAGE", "INSTALLED", "FIXED", "ID"
+          )
+          if rows:
+              body = "\n".join(
+                  "{:<10} {:<28} {:<18} {:<18} {}".format(*row) for row in rows
+              )
+              text = "{}\n{}\n\n{} finding(s) with a fix available.".format(
+                  header, body, len(rows)
+              )
+          else:
+              text = "No HIGH/CRITICAL findings."
+          Path("trivy-report.txt").write_text(text + "\n", encoding="utf-8")
+          print(text)
+          sys.exit(1 if rows else 0)
+          PY
 
       - name: Upload Trivy report
         if: always()
