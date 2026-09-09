@@ -23,6 +23,8 @@ jobs:
 
       - name: Build image and run tests
         uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
           target: test
@@ -42,9 +44,169 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  trivy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+      security-events: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build production image
+        uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
+        with:
+          context: .
+          load: true
+          tags: aboutme:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: aboutme:${{ github.sha }}
+          format: json
+          output: trivy-report.json
+          scanners: vuln
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Write Trivy SARIF
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: aboutme:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          scanners: vuln
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          limit-severities-for-sarif: true
+          exit-code: "0"
+          skip-setup-trivy: true
+
+      - name: Publish Trivy findings
+        if: always()
+        env:
+          IMAGE_REF: aboutme:${{ github.sha }}
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          def cell(value):
+              return str(value or "").replace("|", "\\|").replace("\n", " ")
+
+          image = os.environ.get("IMAGE_REF", "")
+          data = json.loads(Path("trivy-report.json").read_text(encoding="utf-8"))
+          rows = []
+          for result in data.get("Results") or []:
+              for vuln in result.get("Vulnerabilities") or []:
+                  rows.append(
+                      {
+                          "severity": vuln.get("Severity") or "",
+                          "pkg": vuln.get("PkgName") or "",
+                          "installed": vuln.get("InstalledVersion") or "",
+                          "fixed": vuln.get("FixedVersion") or "-",
+                          "cve": vuln.get("VulnerabilityID") or "",
+                          "title": vuln.get("Title") or "",
+                      }
+                  )
+
+          rows.sort(
+              key=lambda row: (
+                  {"CRITICAL": 0, "HIGH": 1}.get(row["severity"], 9),
+                  row["pkg"],
+                  row["cve"],
+              )
+          )
+          counts = {"CRITICAL": 0, "HIGH": 0}
+          for row in rows:
+              if row["severity"] in counts:
+                  counts[row["severity"]] += 1
+
+          if rows:
+              summary = "{} CRITICAL, {} HIGH (fix available)".format(
+                  counts["CRITICAL"], counts["HIGH"]
+              )
+          else:
+              summary = "No HIGH/CRITICAL findings."
+
+          md = [
+              "## Trivy image scan",
+              "",
+              "Image: `{}`".format(image),
+              "",
+              summary,
+              "",
+          ]
+          if rows:
+              md += [
+                  "| Severity | Package | Installed | Fixed | ID | Title |",
+                  "| --- | --- | --- | --- | --- | --- |",
+              ]
+              for row in rows:
+                  md.append(
+                      "| {} | {} | {} | {} | {} | {} |".format(
+                          cell(row["severity"]),
+                          cell(row["pkg"]),
+                          cell(row["installed"]),
+                          cell(row["fixed"]),
+                          cell(row["cve"]),
+                          cell(row["title"]),
+                      )
+                  )
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(
+              "\n".join(md) + "\n", encoding="utf-8"
+          )
+
+          for row in rows:
+              message = "{} {} {} -> {}".format(
+                  row["cve"], row["pkg"], row["installed"], row["fixed"]
+              )
+              if row["severity"] == "CRITICAL":
+                  print("::error title=Trivy CRITICAL::{}".format(message))
+              elif row["severity"] == "HIGH":
+                  print("::warning title=Trivy HIGH::{}".format(message))
+
+          print(summary)
+          for row in rows:
+              print(
+                  "{:<10} {:<28} {:<18} {:<18} {}".format(
+                      row["severity"],
+                      row["pkg"],
+                      row["installed"],
+                      row["fixed"],
+                      row["cve"],
+                  )
+              )
+          sys.exit(1 if counts["CRITICAL"] else 0)
+          PY
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy
+
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test-and-build, gitleaks]
+    needs: [test-and-build, gitleaks, trivy]
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to VPS
@@ -53,7 +215,6 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          script_stop: true
           command_timeout: 20m
           script: |
             set -euo pipefail
