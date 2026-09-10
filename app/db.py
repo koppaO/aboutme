@@ -11,7 +11,7 @@ from app.content import seed_about, seed_projects, seed_theme
 
 SITE_ROW_ID = 1
 _COLUMNS = frozenset({"theme", "about", "projects"})
-RESOURCE_KEYS = ("theme", "me", "projects", "users")
+RESOURCE_KEYS = ("theme", "me", "projects", "users", "apps")
 ADMIN_ROLE = "admin"
 
 _memory: dict[str, Any] | None = None

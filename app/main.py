@@ -98,7 +98,7 @@ async def login(request: Request) -> JSONResponse:
         await auth.reject_login(ip)
     auth.clear_failures(ip)
     response = _json({"ok": True})
-    auth.set_session_cookie(response, token)
+    auth.set_session_cookie(response, token, request)
     return response
 
 
@@ -106,8 +106,20 @@ async def login(request: Request) -> JSONResponse:
 def logout(request: Request) -> JSONResponse:
     auth.require_origin(request)
     response = _json({"ok": True})
-    auth.clear_session_cookie(response)
+    auth.clear_session_cookie(response, request)
     return response
+
+
+@app.get("/session")
+def session(request: Request) -> JSONResponse:
+    user = auth.require_user(request)
+    return _json({"ok": True, "login": user["login"]})
+
+
+@app.get("/authz")
+def authz(request: Request) -> JSONResponse:
+    auth.require_session_resource(request, "apps")
+    return _json({"ok": True})
 
 
 @app.put("/theme")

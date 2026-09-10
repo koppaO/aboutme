@@ -77,6 +77,7 @@ def test_login_sets_httponly_cookie() -> None:
     assert "httponly" in cookie
     assert "secure" in cookie
     assert "samesite=strict" in cookie
+    assert "domain=.koppa0.dev" in cookie
     assert PASSWORD not in response.text
     assert PASSWORD_HASH not in response.text
 
@@ -306,3 +307,42 @@ def test_json_responses_are_not_cached() -> None:
     assert _login().status_code == 200
     saved = client.put("/theme", json=seed_theme(), headers=ORIGIN)
     assert saved.headers.get("cache-control") == "no-store"
+
+
+def test_session_and_authz_without_cookie_401() -> None:
+    client.cookies.clear()
+    assert client.get("/session").status_code == 401
+    assert client.get("/authz").status_code == 401
+
+
+def test_session_and_authz_ok_without_origin() -> None:
+    assert _login().status_code == 200
+    session = client.get("/session")
+    assert session.status_code == 200
+    assert session.json() == {"ok": True, "login": LOGIN}
+    assert "password" not in session.text
+    assert client.get("/authz").status_code == 200
+    assert client.get("/authz").json() == {"ok": True}
+
+
+def test_authz_ignores_foreign_origin() -> None:
+    assert _login().status_code == 200
+    response = client.get("/authz", headers={"Origin": "https://example.com"})
+    assert response.status_code == 200
+
+
+def test_authz_forbidden_without_apps_resource() -> None:
+    db.create_role("editor")
+    db.set_role_resources("editor", ["me"])
+    db.create_user("editor", PASSWORD_HASH, "editor")
+    assert _login(login="editor").status_code == 200
+    assert client.get("/session").status_code == 200
+    assert client.get("/session").json()["login"] == "editor"
+    assert client.get("/authz").status_code == 403
+
+
+def test_authz_forbidden_for_inactive_session() -> None:
+    assert _login().status_code == 200
+    db.set_user_status(LOGIN, False)
+    assert client.get("/session").status_code == 403
+    assert client.get("/authz").status_code == 403
