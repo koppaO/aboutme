@@ -10,6 +10,7 @@ from fastapi import HTTPException, Request, Response
 
 COOKIE_NAME = "session"
 ALLOWED_ORIGIN = "https://koppa0.dev"
+COOKIE_DOMAIN = ".koppa0.dev"
 SESSION_TTL_SEC = 60 * 60 * 24
 HASH_SCHEME = "pbkdf2_sha256"
 HASH_ITERATIONS = 200_000
@@ -181,8 +182,7 @@ def require_origin(request: Request) -> None:
         raise HTTPException(status_code=403, detail="forbidden")
 
 
-def require_admin(request: Request) -> dict[str, Any]:
-    require_origin(request)
+def require_user(request: Request) -> dict[str, Any]:
     user = current_user(request)
     if user is None:
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -191,16 +191,33 @@ def require_admin(request: Request) -> dict[str, Any]:
     return user
 
 
-def require_resource(request: Request, key: str) -> dict[str, Any]:
+def require_admin(request: Request) -> dict[str, Any]:
+    require_origin(request)
+    return require_user(request)
+
+
+def require_session_resource(request: Request, key: str) -> dict[str, Any]:
     from app import db
 
-    user = require_admin(request)
+    user = require_user(request)
     if not db.role_has_resource(int(user["role_id"]), key):
         raise HTTPException(status_code=403, detail="forbidden")
     return user
 
 
-def set_session_cookie(response: Response, token: str) -> None:
+def require_resource(request: Request, key: str) -> dict[str, Any]:
+    require_origin(request)
+    return require_session_resource(request, key)
+
+
+def cookie_domain(request: Request) -> str | None:
+    host = (request.url.hostname or "").lower()
+    if host == "koppa0.dev" or host.endswith(".koppa0.dev"):
+        return COOKIE_DOMAIN
+    return None
+
+
+def set_session_cookie(response: Response, token: str, request: Request) -> None:
     response.set_cookie(
         key=COOKIE_NAME,
         value=token,
@@ -209,13 +226,15 @@ def set_session_cookie(response: Response, token: str) -> None:
         samesite="strict",
         max_age=SESSION_TTL_SEC,
         path="/",
+        domain=cookie_domain(request),
     )
 
 
-def clear_session_cookie(response: Response) -> None:
+def clear_session_cookie(response: Response, request: Request) -> None:
     response.delete_cookie(
         key=COOKIE_NAME,
         path="/",
+        domain=cookie_domain(request),
         secure=True,
         httponly=True,
         samesite="strict",
