@@ -142,6 +142,7 @@ services:
       DEBUG: "False"
     volumes:
       - adventurelog_media:/code/media
+      - ./nginx/adventurelog-aio.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       adventurelog-db:
         condition: service_healthy
