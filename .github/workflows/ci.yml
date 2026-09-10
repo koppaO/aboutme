@@ -1,4 +1,6 @@
 # Этот файл описывает, ЧТО GitHub делает с кодом. Сами секреты сюда не пишем.
+# Проверки — только на PR. Иначе после merge push в main гоняет их второй раз.
+# Деплой — только push в main, без needs на проверки: skipped job блокирует зависимые.
 
 name: ci
 
@@ -10,6 +12,7 @@ on:
 
 jobs:
   test-and-build:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -32,6 +35,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   gitleaks:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Check out full history
@@ -45,6 +49,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   trivy:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -206,7 +211,6 @@ jobs:
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test-and-build, gitleaks, trivy]
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to VPS
