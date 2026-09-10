@@ -12,6 +12,10 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      aurum-web:
+        condition: service_started
+      adventurelog:
+        condition: service_started
     restart: unless-stopped
 
   api:
@@ -52,5 +56,109 @@ services:
       retries: 10
     restart: unless-stopped
 
+  aurum-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${AURUM_POSTGRES_USER:-aurum}
+      POSTGRES_PASSWORD: ${AURUM_POSTGRES_PASSWORD:?Set AURUM_POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${AURUM_POSTGRES_DB:-aurum}
+    volumes:
+      - aurum_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AURUM_POSTGRES_USER:-aurum}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  aurum-backend:
+    build:
+      context: https://github.com/Zproger/Aurum.git#main:backend
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      AURUM_POSTGRES_USER: ${AURUM_POSTGRES_USER:-aurum}
+      AURUM_POSTGRES_PASSWORD: ${AURUM_POSTGRES_PASSWORD:?Set AURUM_POSTGRES_PASSWORD in .env}
+      AURUM_POSTGRES_DB: ${AURUM_POSTGRES_DB:-aurum}
+      AURUM_POSTGRES_HOST: aurum-db
+      AURUM_POSTGRES_PORT: "5432"
+      AURUM_CORS_ORIGINS: ${AURUM_CORS_ORIGINS:-https://money.koppa0.dev}
+      AURUM_DEFAULT_CURRENCY: ${AURUM_DEFAULT_CURRENCY:-USD}
+      AURUM_COINGECKO_API_KEY: ${AURUM_COINGECKO_API_KEY:-}
+      AURUM_ENABLE_DOCS: "false"
+    networks:
+      default:
+        aliases:
+          - backend
+    depends_on:
+      aurum-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  aurum-web:
+    build:
+      context: https://github.com/Zproger/Aurum.git#main:frontend
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      AURUM_ALLOWED_HOSTS: ${AURUM_ALLOWED_HOSTS:-money.koppa0.dev}
+    depends_on:
+      aurum-backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  adventurelog-db:
+    image: postgis/postgis:16-3.5
+    environment:
+      POSTGRES_DB: database
+      POSTGRES_USER: adventure
+      POSTGRES_PASSWORD: ${ADVENTURELOG_POSTGRES_PASSWORD:?Set ADVENTURELOG_POSTGRES_PASSWORD in .env}
+    volumes:
+      - adventurelog_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adventure -d database"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  adventurelog:
+    image: ghcr.io/seanmorley15/adventurelog:latest
+    environment:
+      SITE_URL: ${ADVENTURELOG_SITE_URL:-https://travel.koppa0.dev}
+      POSTGRES_PASSWORD: ${ADVENTURELOG_POSTGRES_PASSWORD:?Set ADVENTURELOG_POSTGRES_PASSWORD in .env}
+      PGHOST: adventurelog-db
+      POSTGRES_DB: database
+      POSTGRES_USER: adventure
+      PORT: "3000"
+      DISABLE_REGISTRATION: "True"
+      DISABLE_REGISTRATION_MESSAGE: "Registration is disabled."
+      DJANGO_ADMIN_USERNAME: ${ADVENTURELOG_ADMIN_USERNAME:-admin}
+      DJANGO_ADMIN_PASSWORD: ${ADVENTURELOG_ADMIN_PASSWORD:?Set ADVENTURELOG_ADMIN_PASSWORD in .env}
+      DJANGO_ADMIN_EMAIL: ${ADVENTURELOG_ADMIN_EMAIL:-admin@koppa0.dev}
+      ENABLE_RATE_LIMITS: "True"
+      GUNICORN_WORKERS: ${ADVENTURELOG_GUNICORN_WORKERS:-1}
+      DEBUG: "False"
+    volumes:
+      - adventurelog_media:/code/media
+    depends_on:
+      adventurelog-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:80/health')\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  aurum_pgdata:
+  adventurelog_pgdata:
+  adventurelog_media:
