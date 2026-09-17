@@ -158,6 +158,20 @@ services:
       start_period: 120s
     restart: unless-stopped
 
+  wg-easy:
+    env_file:
+      - .env
+    image: ghcr.io/wg-easy/wg-easy:latest
+    ports:
+      - "51820:51820/udp"
+      - "127.0.0.1:51821:51821/tcp"
+    container_name: wg-easy
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    restart: unless-stopped
+    volumes:
+      - ~/.wg-easy:/etc/wireguard
 volumes:
   pgdata:
   aurum_pgdata:
