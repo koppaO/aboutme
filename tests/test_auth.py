@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -77,7 +80,7 @@ def test_login_sets_httponly_cookie() -> None:
     assert "httponly" in cookie
     assert "secure" in cookie
     assert "samesite=strict" in cookie
-    assert "domain=.koppa0.dev" in cookie
+    assert "domain=" not in cookie
     assert PASSWORD not in response.text
     assert PASSWORD_HASH not in response.text
 
@@ -309,40 +312,79 @@ def test_json_responses_are_not_cached() -> None:
     assert saved.headers.get("cache-control") == "no-store"
 
 
-def test_session_and_authz_without_cookie_401() -> None:
+def test_session_without_cookie_401() -> None:
     client.cookies.clear()
     assert client.get("/session").status_code == 401
-    assert client.get("/authz").status_code == 401
+    assert client.get("/authz").status_code == 404
 
 
-def test_session_and_authz_ok_without_origin() -> None:
+def test_session_ok_without_origin() -> None:
     assert _login().status_code == 200
     session = client.get("/session")
     assert session.status_code == 200
     assert session.json() == {"ok": True, "login": LOGIN}
     assert "password" not in session.text
-    assert client.get("/authz").status_code == 200
-    assert client.get("/authz").json() == {"ok": True}
 
 
-def test_authz_ignores_foreign_origin() -> None:
-    assert _login().status_code == 200
-    response = client.get("/authz", headers={"Origin": "https://example.com"})
-    assert response.status_code == 200
-
-
-def test_authz_forbidden_without_apps_resource() -> None:
-    db.create_role("editor")
-    db.set_role_resources("editor", ["me"])
-    db.create_user("editor", PASSWORD_HASH, "editor")
-    assert _login(login="editor").status_code == 200
-    assert client.get("/session").status_code == 200
-    assert client.get("/session").json()["login"] == "editor"
-    assert client.get("/authz").status_code == 403
-
-
-def test_authz_forbidden_for_inactive_session() -> None:
+def test_inactive_session_gets_403() -> None:
     assert _login().status_code == 200
     db.set_user_status(LOGIN, False)
     assert client.get("/session").status_code == 403
-    assert client.get("/authz").status_code == 403
+
+
+def test_spoofed_forwarded_for_does_not_bypass_lockout(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "MAX_FAILURES", 2)
+    assert _login("nope").status_code == 401
+    assert _login("nope").status_code == 401
+    response = client.post(
+        "/login",
+        json={"login": LOGIN, "password": PASSWORD},
+        headers={
+            **ORIGIN,
+            "X-Forwarded-For": "203.0.113.9",
+            "X-Real-IP": "203.0.113.8",
+        },
+    )
+    assert response.status_code == 429
+
+
+def test_placeholder_session_secret_cannot_login(monkeypatch) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "replace-with-long-random-string")
+    response = _login()
+    assert response.status_code == 401
+    assert "session=" not in response.headers.get("set-cookie", "").lower()
+
+
+def test_session_rejected_when_password_tag_mismatches() -> None:
+    assert _login().status_code == 200
+    user = db.get_user_by_login(LOGIN)
+    assert user is not None
+    token = auth.make_session(LOGIN, user["password_hash"])
+    assert token is not None
+    payload, _sig = token.rsplit(".", 1)
+    kind, login, exp, _tag = payload.split(".")
+    bad_payload = f"{kind}.{login}.{exp}.{'0' * 16}"
+    bad_sig = hmac.new(b"s" * 32, bad_payload.encode(), hashlib.sha256).hexdigest()
+    client.cookies.clear()
+    client.cookies.set("session", f"{bad_payload}.{bad_sig}", domain="koppa0.dev")
+    assert client.get("/session").status_code == 401
+
+
+def test_put_rejects_oversized_body() -> None:
+    assert _login().status_code == 200
+    response = client.put(
+        "/theme",
+        content=b"{" + b"a" * (300 * 1024),
+        headers={**ORIGIN, "Content-Type": "application/json"},
+    )
+    assert response.status_code == 413
+
+
+def test_post_users_short_password_422() -> None:
+    assert _login().status_code == 200
+    response = client.post(
+        "/users",
+        json={"login": "other", "password": "short", "role": "admin"},
+        headers=ORIGIN,
+    )
+    assert response.status_code == 422

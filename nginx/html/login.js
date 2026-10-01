@@ -1,26 +1,13 @@
-const FALLBACK_NEXT = "/apps.html";
-const ALLOWED_NEXT_HOSTS = new Set([
-  "koppa0.dev",
-  "money.koppa0.dev",
-  "travel.koppa0.dev",
-]);
+const FALLBACK_NEXT = "/";
 
 function safeNext(raw) {
-  if (!raw) {
+  if (typeof raw !== "string" || !raw || raw.length > 500) {
     return FALLBACK_NEXT;
   }
-  if (raw.startsWith("/") && !raw.startsWith("//") && !raw.includes("\\")) {
-    return raw;
-  }
-  try {
-    const url = new URL(raw);
-    if (url.protocol === "https:" && ALLOWED_NEXT_HOSTS.has(url.hostname)) {
-      return url.href;
-    }
-  } catch (_err) {
+  if (!raw.startsWith("/") || raw.startsWith("//") || /[\u0000-\u001F\u007F\\]/.test(raw)) {
     return FALLBACK_NEXT;
   }
-  return FALLBACK_NEXT;
+  return raw;
 }
 
 function nextTarget() {

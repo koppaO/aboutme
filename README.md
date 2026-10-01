@@ -38,13 +38,17 @@ curl http://localhost:8080/api/projects
 ## Docker Compose
 
 Postgres наружу не публикуется, только docker-сеть.
+На VPS nginx слушает 80 и 443 и ждёт сертификат Let's Encrypt.
+
+Локально, без сертификата:
 
 ```bash
 cp .env.example .env
-docker compose up --build
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build nginx api postgres
 ```
 
 Проверка: `curl http://localhost:8080/api/health` → `{"status":"ok","database":"ok"}`.
 В браузере: `http://localhost:8080/` — страница читает `/api/me` и `/api/projects`.
-Наружу открыт только nginx (`8080`). API и Postgres — docker-сеть.
-Остановка: `docker compose down`.
+Наружу открыт только nginx. API и Postgres — docker-сеть.
+`SESSION_SECRET` в `.env` должен быть длинной случайной строкой, не заглушкой из примера.
+Остановка: `docker compose -f docker-compose.yml -f docker-compose.local.yml down`.
