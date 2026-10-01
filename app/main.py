@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -7,12 +8,14 @@ from fastapi.responses import JSONResponse
 from app import auth, db, schemas
 
 NO_STORE = {"Cache-Control": "no-store"}
+MAX_JSON_BYTES = 256 * 1024
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     db.init_site_state()
     yield
+    db.close_pool()
 
 
 app = FastAPI(
@@ -28,7 +31,23 @@ def _json(payload: Any, status: int = 200) -> JSONResponse:
     return JSONResponse(payload, status_code=status, headers=NO_STORE)
 
 
+async def _read_limited(request: Request) -> bytes:
+    declared = request.headers.get("content-length")
+    if declared:
+        try:
+            size = int(declared)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid json") from exc
+        if size > MAX_JSON_BYTES:
+            raise HTTPException(status_code=413, detail="payload too large")
+    raw = await request.body()
+    if len(raw) > MAX_JSON_BYTES:
+        raise HTTPException(status_code=413, detail="payload too large")
+    return raw
+
+
 async def _json_body(request: Request) -> Any:
+    await _read_limited(request)
     try:
         return await request.json()
     except Exception as exc:
@@ -43,6 +62,7 @@ def _parse_or_422(parse, raw: Any) -> Any:
 
 
 async def _login_body(request: Request) -> tuple[str, str] | None:
+    await _read_limited(request)
     try:
         body = await request.json()
     except Exception:
@@ -91,9 +111,12 @@ async def login(request: Request) -> JSONResponse:
     ip = auth.client_ip(request)
     await auth.login_allowed(ip)
     pair = await _login_body(request)
-    if pair is None or not auth.credentials_ok(pair[0], pair[1]):
+    user = None
+    if pair is not None:
+        user = await asyncio.to_thread(auth.authenticate, pair[0], pair[1])
+    if user is None:
         await auth.reject_login(ip)
-    token = auth.make_session(pair[0])
+    token = auth.make_session(user["login"], user["password_hash"])
     if token is None:
         await auth.reject_login(ip)
     auth.clear_failures(ip)
@@ -116,40 +139,43 @@ def session(request: Request) -> JSONResponse:
     return _json({"ok": True, "login": user["login"]})
 
 
-@app.get("/authz")
-def authz(request: Request) -> JSONResponse:
-    auth.require_session_resource(request, "apps")
-    return _json({"ok": True})
-
-
 @app.put("/theme")
 async def put_theme(request: Request) -> JSONResponse:
     auth.require_resource(request, "theme")
     payload = _parse_or_422(schemas.parse_theme, await _json_body(request))
-    return _json(db.put_theme(payload))
+    return _json(await asyncio.to_thread(db.put_theme, payload))
 
 
 @app.put("/me")
 async def put_me(request: Request) -> JSONResponse:
     auth.require_resource(request, "me")
     payload = _parse_or_422(schemas.parse_about, await _json_body(request))
-    return _json(db.put_about(payload))
+    return _json(await asyncio.to_thread(db.put_about, payload))
 
 
 @app.put("/projects")
 async def put_projects(request: Request) -> JSONResponse:
     auth.require_resource(request, "projects")
     payload = _parse_or_422(schemas.parse_projects, await _json_body(request))
-    return _json(db.put_projects(payload))
+    return _json(await asyncio.to_thread(db.put_projects, payload))
 
 
 @app.post("/users")
 async def post_users(request: Request) -> JSONResponse:
     auth.require_resource(request, "users")
     payload = _parse_or_422(schemas.parse_new_user, await _json_body(request))
-    encoded = auth.hash_password(payload["password"], iterations=auth.HASH_ITERATIONS)
+    encoded = await asyncio.to_thread(
+        auth.hash_password,
+        payload["password"],
+        iterations=auth.HASH_ITERATIONS,
+    )
     try:
-        created = db.create_user(payload["login"], encoded, payload["role"])
+        created = await asyncio.to_thread(
+            db.create_user,
+            payload["login"],
+            encoded,
+            payload["role"],
+        )
     except db.UnknownRole as exc:
         raise HTTPException(status_code=422, detail="invalid user") from exc
     except db.DuplicateUser as exc:

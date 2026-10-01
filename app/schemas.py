@@ -19,6 +19,7 @@ MAX_PROJECTS = 50
 MAX_STACK = 20
 MAX_LINKS = 10
 MAX_LOGIN = 32
+MIN_PASSWORD = 8
 MAX_PASSWORD = 256
 LOGIN_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 
@@ -158,7 +159,11 @@ def parse_new_user(raw: Any) -> dict[str, str]:
     if not isinstance(raw, dict):
         raise PayloadError("invalid user")
     password = raw.get("password")
-    if not isinstance(password, str) or not password or len(password) > MAX_PASSWORD:
+    if (
+        not isinstance(password, str)
+        or len(password) < MIN_PASSWORD
+        or len(password) > MAX_PASSWORD
+    ):
         raise PayloadError("invalid user")
     role = _clip(raw.get("role"), MAX_LOGIN)
     if not LOGIN_RE.fullmatch(role):

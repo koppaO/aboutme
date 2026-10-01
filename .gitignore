@@ -13,3 +13,4 @@ __pycache__/
 *.py[cod]
 .python-version
 nginx/certbot-www/.well-known/
+cookies.txt

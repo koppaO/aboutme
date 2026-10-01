@@ -2,7 +2,10 @@ import copy
 import json
 import os
 import re
-from typing import Any
+import threading
+from contextlib import contextmanager
+from queue import Empty, Queue
+from typing import Any, Iterator
 from urllib.parse import quote_plus
 
 import psycopg
@@ -11,12 +14,18 @@ from app.content import seed_about, seed_projects, seed_theme
 
 SITE_ROW_ID = 1
 _COLUMNS = frozenset({"theme", "about", "projects"})
-RESOURCE_KEYS = ("theme", "me", "projects", "users", "apps")
+RESOURCE_KEYS = ("theme", "me", "projects", "users")
 ADMIN_ROLE = "admin"
+_POOL_MAX = 8
 
 _memory: dict[str, Any] | None = None
 _ready = False
 _postgres = False
+_cache: dict[str, Any] = {}
+_pool: Queue[psycopg.Connection] | None = None
+_pool_size = 0
+_pool_lock = threading.Lock()
+_pool_url: str | None = None
 
 
 class DuplicateUser(Exception):
@@ -45,10 +54,99 @@ def _database_url() -> str | None:
     )
 
 
+def _open_pool(url: str) -> None:
+    global _pool, _pool_url
+    if _pool is not None:
+        return
+    _pool_url = url
+    _pool = Queue(maxsize=_POOL_MAX)
+
+
+def close_pool() -> None:
+    global _pool, _pool_size, _pool_url
+    queue = _pool
+    _pool = None
+    _pool_url = None
+    if queue is None:
+        _pool_size = 0
+        return
+    while True:
+        try:
+            conn = queue.get_nowait()
+        except Empty:
+            break
+        conn.close()
+    with _pool_lock:
+        _pool_size = 0
+
+
+def _discard(conn: psycopg.Connection) -> None:
+    global _pool_size
+    try:
+        conn.close()
+    except Exception:
+        pass
+    with _pool_lock:
+        _pool_size = max(0, _pool_size - 1)
+
+
+def _checkout() -> psycopg.Connection:
+    global _pool_size
+    if _pool is None or _pool_url is None:
+        raise RuntimeError("database pool missing")
+    try:
+        return _pool.get_nowait()
+    except Empty:
+        pass
+    with _pool_lock:
+        if _pool_size < _POOL_MAX:
+            _pool_size += 1
+            try:
+                conn = psycopg.connect(_pool_url, connect_timeout=3)
+            except Exception:
+                _pool_size -= 1
+                raise
+            conn.autocommit = True
+            return conn
+    try:
+        return _pool.get(timeout=5)
+    except Empty as exc:
+        raise RuntimeError("database pool exhausted") from exc
+
+
+def _checkin(conn: psycopg.Connection) -> None:
+    if _pool is None:
+        conn.close()
+        return
+    try:
+        _pool.put_nowait(conn)
+    except Exception:
+        _discard(conn)
+
+
+@contextmanager
+def _pg() -> Iterator[psycopg.Connection]:
+    conn = _checkout()
+    try:
+        yield conn
+    except (psycopg.OperationalError, psycopg.InterfaceError):
+        _discard(conn)
+        raise
+    except Exception:
+        _checkin(conn)
+        raise
+    else:
+        _checkin(conn)
+
+
 def database_status() -> str | None:
     url = _database_url()
     if not url:
         return None
+    if _pool is not None:
+        with _pg() as conn:
+            conn.execute("SELECT 1")
+        return "ok"
     with psycopg.connect(url, connect_timeout=3) as conn:
         conn.execute("SELECT 1")
     return "ok"
@@ -234,9 +332,11 @@ def _init_postgres(url: str) -> None:
 
 def init_site_state() -> None:
     global _ready, _postgres
+    _cache.clear()
     url = _database_url()
     if url:
         _init_postgres(url)
+        _open_pool(url)
         _postgres = True
     else:
         _init_memory()
@@ -252,6 +352,7 @@ def ensure_site_state() -> None:
 def reload_seed() -> None:
     """Replace live state with JSON/theme seed and reset users. Used by tests."""
     global _ready, _memory, _postgres
+    _cache.clear()
     seed = _blank_site()
     url = _database_url()
     if url:
@@ -279,6 +380,7 @@ def reload_seed() -> None:
             )
             _seed_catalogs_postgres(conn)
             _seed_first_admin_postgres(conn)
+        _open_pool(url)
         _postgres = True
         _ready = True
         return
@@ -294,38 +396,45 @@ def _require_column(column: str) -> str:
     return column
 
 
+def _remember(column: str, value: Any) -> Any:
+    stored = copy.deepcopy(value)
+    _cache[column] = stored
+    return copy.deepcopy(stored)
+
+
 def _fetch_column(column: str) -> Any:
     column = _require_column(column)
     ensure_site_state()
+    if column in _cache:
+        return copy.deepcopy(_cache[column])
     if _postgres:
-        url = _database_url()
-        if not url:
-            raise RuntimeError("database url missing")
-        with psycopg.connect(url) as conn:
+        with _pg() as conn:
             row = conn.execute(
                 f"SELECT {column} FROM site_state WHERE id = %s",
                 (SITE_ROW_ID,),
             ).fetchone()
         if row is None:
+            url = _database_url()
+            if not url:
+                raise RuntimeError("database url missing")
             _init_postgres(url)
-            with psycopg.connect(url) as conn:
+            with _pg() as conn:
                 row = conn.execute(
                     f"SELECT {column} FROM site_state WHERE id = %s",
                     (SITE_ROW_ID,),
                 ).fetchone()
         if row is None:
             raise RuntimeError("site_state missing")
-        return row[0]
+        return _remember(column, row[0])
     assert _memory is not None
-    return copy.deepcopy(_memory[column])
+    return _remember(column, _memory[column])
 
 
 def _store_column(column: str, value: Any) -> Any:
     column = _require_column(column)
     ensure_site_state()
-    url = _database_url() if _postgres else None
-    if url:
-        with psycopg.connect(url) as conn:
+    if _postgres:
+        with _pg() as conn:
             conn.execute(
                 f"""
                 UPDATE site_state
@@ -334,10 +443,10 @@ def _store_column(column: str, value: Any) -> Any:
                 """,
                 (json.dumps(value), SITE_ROW_ID),
             )
-        return value
+        return _remember(column, value)
     assert _memory is not None
     _memory[column] = copy.deepcopy(value)
-    return copy.deepcopy(value)
+    return _remember(column, value)
 
 
 def get_theme() -> Any:
@@ -377,10 +486,7 @@ def _user_from_row(row: Any) -> dict[str, Any]:
 def get_user_by_login(login: str) -> dict[str, Any] | None:
     ensure_site_state()
     if _postgres:
-        url = _database_url()
-        if not url:
-            raise RuntimeError("database url missing")
-        with psycopg.connect(url) as conn:
+        with _pg() as conn:
             row = conn.execute(
                 """
                 SELECT id, login, password_hash, status, role_id
@@ -402,10 +508,7 @@ def get_user_by_login(login: str) -> dict[str, Any] | None:
 def role_has_resource(role_id: int, key: str) -> bool:
     ensure_site_state()
     if _postgres:
-        url = _database_url()
-        if not url:
-            raise RuntimeError("database url missing")
-        with psycopg.connect(url) as conn:
+        with _pg() as conn:
             row = conn.execute(
                 """
                 SELECT 1
@@ -429,10 +532,7 @@ def role_has_resource(role_id: int, key: str) -> bool:
 def role_id_by_name(name: str) -> int | None:
     ensure_site_state()
     if _postgres:
-        url = _database_url()
-        if not url:
-            raise RuntimeError("database url missing")
-        with psycopg.connect(url) as conn:
+        with _pg() as conn:
             row = conn.execute("SELECT id FROM roles WHERE name = %s", (name,)).fetchone()
         return None if row is None else int(row[0])
     assert _memory is not None
@@ -448,10 +548,7 @@ def create_role(name: str) -> int:
     if existing is not None:
         return existing
     if _postgres:
-        url = _database_url()
-        if not url:
-            raise RuntimeError("database url missing")
-        with psycopg.connect(url) as conn:
+        with _pg() as conn:
             row = conn.execute(
                 "INSERT INTO roles (name) VALUES (%s) RETURNING id",
                 (name,),
@@ -474,19 +571,24 @@ def set_role_resources(role_name: str, keys: list[str]) -> None:
         raise ValueError("unknown resource")
     ensure_site_state()
     if _postgres:
-        url = _database_url()
-        if not url:
-            raise RuntimeError("database url missing")
-        with psycopg.connect(url) as conn:
-            conn.execute("DELETE FROM role_resources WHERE role_id = %s", (role_id,))
-            for key in keys:
-                conn.execute(
-                    """
-                    INSERT INTO role_resources (role_id, resource_id)
-                    SELECT %s, id FROM resources WHERE key = %s
-                    """,
-                    (role_id, key),
-                )
+        with _pg() as conn:
+            conn.autocommit = False
+            try:
+                conn.execute("DELETE FROM role_resources WHERE role_id = %s", (role_id,))
+                for key in keys:
+                    conn.execute(
+                        """
+                        INSERT INTO role_resources (role_id, resource_id)
+                        SELECT %s, id FROM resources WHERE key = %s
+                        """,
+                        (role_id, key),
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.autocommit = True
         return
     assert _memory is not None
     _memory["role_resources"] = {
@@ -505,18 +607,18 @@ def create_user(login: str, password_hash: str, role_name: str, status: bool = T
     if role_id is None:
         raise UnknownRole(role_name)
     if _postgres:
-        url = _database_url()
-        if not url:
-            raise RuntimeError("database url missing")
-        with psycopg.connect(url) as conn:
-            row = conn.execute(
-                """
-                INSERT INTO users (login, password_hash, status, role_id)
-                VALUES (%s, %s, %s, %s)
-                RETURNING id, login, password_hash, status, role_id
-                """,
-                (login, password_hash, status, role_id),
-            ).fetchone()
+        with _pg() as conn:
+            try:
+                row = conn.execute(
+                    """
+                    INSERT INTO users (login, password_hash, status, role_id)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id, login, password_hash, status, role_id
+                    """,
+                    (login, password_hash, status, role_id),
+                ).fetchone()
+            except psycopg.errors.UniqueViolation as exc:
+                raise DuplicateUser(login) from exc
         assert row is not None
         return _user_from_row(row)
     assert _memory is not None
@@ -536,10 +638,7 @@ def create_user(login: str, password_hash: str, role_name: str, status: bool = T
 def set_user_status(login: str, status: bool) -> None:
     ensure_site_state()
     if _postgres:
-        url = _database_url()
-        if not url:
-            raise RuntimeError("database url missing")
-        with psycopg.connect(url) as conn:
+        with _pg() as conn:
             conn.execute("UPDATE users SET status = %s WHERE login = %s", (status, login))
         return
     assert _memory is not None

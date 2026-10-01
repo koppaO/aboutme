@@ -5,12 +5,12 @@ import hmac
 import os
 import time
 from typing import Any, NoReturn
+from urllib.parse import urlparse
 
 from fastapi import HTTPException, Request, Response
 
 COOKIE_NAME = "session"
 ALLOWED_ORIGIN = "https://koppa0.dev"
-COOKIE_DOMAIN = ".koppa0.dev"
 SESSION_TTL_SEC = 60 * 60 * 24
 HASH_SCHEME = "pbkdf2_sha256"
 HASH_ITERATIONS = 200_000
@@ -18,6 +18,15 @@ MIN_SECRET_LEN = 16
 MAX_FAILURES = 5
 LOCKOUT_SEC = 60
 FAIL_DELAY_SEC = 0.4
+MAX_TRACKED_IPS = 4096
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1"})
+_PLACEHOLDER_SECRETS = frozenset(
+    {
+        "replace-with-long-random-string",
+        "changeme",
+        "change-me",
+    }
+)
 
 _attempts: dict[str, dict[str, Any]] = {}
 
@@ -79,36 +88,50 @@ def _dummy_hash() -> str:
     return hash_password("invalid", salt=b"\x00" * 16, iterations=HASH_ITERATIONS)
 
 
-def credentials_ok(login: str, password: str) -> bool:
+def authenticate(login: str, password: str) -> dict[str, Any] | None:
     from app import db
 
     user = db.get_user_by_login(login)
     if user is None:
         verify_password(password, _dummy_hash())
-        return False
+        return None
     if not verify_password(password, user["password_hash"]):
-        return False
-    return bool(user["status"])
+        return None
+    if not user["status"]:
+        return None
+    return user
+
+
+def credentials_ok(login: str, password: str) -> bool:
+    return authenticate(login, password) is not None
 
 
 def _secret() -> bytes | None:
-    value = os.getenv("SESSION_SECRET") or ""
-    if len(value) < MIN_SECRET_LEN:
+    value = (os.getenv("SESSION_SECRET") or "").strip()
+    if len(value) < MIN_SECRET_LEN or value in _PLACEHOLDER_SECRETS:
         return None
     return value.encode("utf-8")
 
 
-def make_session(login: str) -> str | None:
+def _password_tag(password_hash: str) -> str | None:
     secret = _secret()
     if secret is None:
         return None
+    return hmac.new(secret, password_hash.encode("utf-8"), hashlib.sha256).hexdigest()[:16]
+
+
+def make_session(login: str, password_hash: str) -> str | None:
+    secret = _secret()
+    tag = _password_tag(password_hash)
+    if secret is None or tag is None:
+        return None
     expires = int(time.time()) + SESSION_TTL_SEC
-    payload = f"user.{login}.{expires}"
+    payload = f"user.{login}.{expires}.{tag}"
     sig = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
     return f"{payload}.{sig}"
 
 
-def session_login(token: str) -> str | None:
+def session_claims(token: str) -> tuple[str, str] | None:
     secret = _secret()
     if secret is None or not token:
         return None
@@ -120,13 +143,15 @@ def session_login(token: str) -> str | None:
     if not hmac.compare_digest(sig, expected):
         return None
     try:
-        kind, login, exp_s = payload.split(".")
+        kind, login, exp_s, tag = payload.split(".")
         expires = int(exp_s)
     except ValueError:
         return None
-    if kind != "user" or expires < int(time.time()):
+    if kind != "user" or not login or expires < int(time.time()):
         return None
-    return login
+    if len(tag) != 16:
+        return None
+    return login, tag
 
 
 def current_user(request: Request) -> dict[str, Any] | None:
@@ -135,23 +160,56 @@ def current_user(request: Request) -> dict[str, Any] | None:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         return None
-    login = session_login(token)
-    if login is None:
+    claims = session_claims(token)
+    if claims is None:
         return None
-    return db.get_user_by_login(login)
+    login, tag = claims
+    user = db.get_user_by_login(login)
+    if user is None:
+        return None
+    expected = _password_tag(user["password_hash"])
+    if expected is None or not hmac.compare_digest(tag, expected):
+        return None
+    return user
 
 
 def client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",", 1)[0].strip() or "unknown"
-    if request.client:
+    if os.getenv("TRUST_PROXY") == "1":
+        real = (request.headers.get("x-real-ip") or "").strip()
+        if real and len(real) <= 64 and "\n" not in real and "\r" not in real and "," not in real:
+            return real
+    if request.client and request.client.host:
         return request.client.host
     return "unknown"
 
 
 def reset_rate_limits() -> None:
     _attempts.clear()
+
+
+def _prune_attempts(now: float) -> None:
+    stale = [
+        ip
+        for ip, row in _attempts.items()
+        if float(row.get("locked_until") or 0) <= now
+        and now - float(row.get("seen") or 0) > LOCKOUT_SEC
+    ]
+    for ip in stale:
+        _attempts.pop(ip, None)
+    if len(_attempts) <= MAX_TRACKED_IPS:
+        return
+    unlocked = sorted(
+        (
+            ip
+            for ip, row in _attempts.items()
+            if float(row.get("locked_until") or 0) <= now
+        ),
+        key=lambda ip: float(_attempts[ip].get("seen") or 0),
+    )
+    for ip in unlocked:
+        if len(_attempts) <= MAX_TRACKED_IPS:
+            break
+        _attempts.pop(ip, None)
 
 
 def _locked_until(ip: str) -> float:
@@ -162,24 +220,52 @@ def _locked_until(ip: str) -> float:
 
 
 def is_locked(ip: str) -> bool:
-    return _locked_until(ip) > time.time()
+    row = _attempts.get(ip)
+    if not row:
+        return False
+    if float(row.get("locked_until") or 0) > time.time():
+        return True
+    if int(row.get("count") or 0) >= MAX_FAILURES:
+        row["count"] = 0
+        row["locked_until"] = 0.0
+    return False
 
 
 def register_failure(ip: str) -> None:
-    row = _attempts.setdefault(ip, {"count": 0, "locked_until": 0.0})
+    now = time.time()
+    _prune_attempts(now)
+    row = _attempts.setdefault(ip, {"count": 0, "locked_until": 0.0, "seen": now})
+    row["seen"] = now
     row["count"] = int(row["count"]) + 1
     if row["count"] >= MAX_FAILURES:
-        row["locked_until"] = time.time() + LOCKOUT_SEC
+        row["locked_until"] = now + LOCKOUT_SEC
+    _prune_attempts(now)
 
 
 def clear_failures(ip: str) -> None:
     _attempts.pop(ip, None)
 
 
+def _origin_hostname(origin: str) -> str | None:
+    parsed = urlparse(origin)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    return parsed.hostname.lower()
+
+
 def require_origin(request: Request) -> None:
     origin = request.headers.get("origin")
-    if origin != ALLOWED_ORIGIN:
-        raise HTTPException(status_code=403, detail="forbidden")
+    if origin == ALLOWED_ORIGIN:
+        return
+    host = (request.url.hostname or "").lower()
+    if (
+        origin
+        and host in _LOCAL_HOSTS
+        and _origin_hostname(origin) == host
+        and urlparse(origin).scheme == "http"
+    ):
+        return
+    raise HTTPException(status_code=403, detail="forbidden")
 
 
 def require_user(request: Request) -> dict[str, Any]:
@@ -210,11 +296,9 @@ def require_resource(request: Request, key: str) -> dict[str, Any]:
     return require_session_resource(request, key)
 
 
-def cookie_domain(request: Request) -> str | None:
+def _cookie_secure(request: Request) -> bool:
     host = (request.url.hostname or "").lower()
-    if host == "koppa0.dev" or host.endswith(".koppa0.dev"):
-        return COOKIE_DOMAIN
-    return None
+    return not (host in _LOCAL_HOSTS and request.url.scheme == "http")
 
 
 def set_session_cookie(response: Response, token: str, request: Request) -> None:
@@ -222,11 +306,10 @@ def set_session_cookie(response: Response, token: str, request: Request) -> None
         key=COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=True,
+        secure=_cookie_secure(request),
         samesite="strict",
         max_age=SESSION_TTL_SEC,
         path="/",
-        domain=cookie_domain(request),
     )
 
 
@@ -234,8 +317,7 @@ def clear_session_cookie(response: Response, request: Request) -> None:
     response.delete_cookie(
         key=COOKIE_NAME,
         path="/",
-        domain=cookie_domain(request),
-        secure=True,
+        secure=_cookie_secure(request),
         httponly=True,
         samesite="strict",
     )
