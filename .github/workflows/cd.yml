@@ -144,7 +144,6 @@ jobs:
                 reload_nginx
                 ;;
               all)
-                docker compose pull
                 docker compose up -d --build
                 wait_api
                 reload_nginx
