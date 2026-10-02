@@ -12,6 +12,9 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    networks:
+      - default
+      - wg_ui
     restart: unless-stopped
 
   api:
@@ -61,3 +64,8 @@ services:
 
 volumes:
   pgdata:
+
+networks:
+  wg_ui:
+    name: wg_default
+    external: true
