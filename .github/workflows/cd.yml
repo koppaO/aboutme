@@ -1,0 +1,153 @@
+# Выкладка на VPS только после тех же проверок, что и на pull request.
+# План по diff этого push:
+#   app/, Dockerfile, requirements.txt, .dockerignore -> пересобрать api
+#   nginx/, кроме nginx/local.conf -> перечитать конфиг nginx
+#   docker-compose.yml -> сверить все сервисы
+#   тесты, README, локальный compose, content/ -> только git на сервере
+# content/*.json в уже заполненную Postgres не перечитывается, рестарт api это не меняет.
+# После пересоздания api nginx перечитывает upstream: имя api резолвится при старте.
+
+name: cd
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-main
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Choose services
+        id: plan
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          plan=all
+          if [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            all=0
+            api=0
+            nginx=0
+            while IFS= read -r file; do
+              [ -n "$file" ] || continue
+              case "$file" in
+                docker-compose.yml) all=1 ;;
+                Dockerfile|requirements.txt|.dockerignore) api=1 ;;
+                app|app/*) api=1 ;;
+                nginx/local.conf) ;;
+                nginx|nginx/*) nginx=1 ;;
+              esac
+            done < <(git diff --name-only "$BEFORE" "$AFTER")
+            if [ "$all" = 1 ]; then
+              plan=all
+            elif [ "$api" = 1 ] && [ "$nginx" = 1 ]; then
+              plan=api,nginx
+            elif [ "$api" = 1 ]; then
+              plan=api
+            elif [ "$nginx" = 1 ]; then
+              plan=nginx
+            else
+              plan=none
+            fi
+          fi
+          echo "Deploy plan: $plan"
+          echo "plan=$plan" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
+          DEPLOY_PLAN: ${{ steps.plan.outputs.plan }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          command_timeout: 45m
+          envs: DEPLOY_SHA,DEPLOY_PLAN
+          script: |
+            set -euo pipefail
+            case "$DEPLOY_PLAN" in
+              none|api|nginx|api,nginx|all) ;;
+              *) echo "unknown plan: $DEPLOY_PLAN" >&2; exit 1 ;;
+            esac
+            if ! printf '%s' "$DEPLOY_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+              echo "bad sha" >&2
+              exit 1
+            fi
+            cd ~/app/aboutme
+            git fetch origin main
+            git checkout -f -B main "$DEPLOY_SHA"
+            echo "checked out $DEPLOY_SHA plan=$DEPLOY_PLAN"
+
+            reload_nginx() {
+              docker compose exec -T nginx nginx -s reload
+            }
+
+            wait_api() {
+              local i cid status
+              for i in $(seq 1 40); do
+                cid="$(docker compose ps -q api || true)"
+                if [ -n "$cid" ]; then
+                  status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid")"
+                  if [ "$status" = healthy ]; then
+                    echo "api healthy"
+                    return 0
+                  fi
+                fi
+                sleep 3
+              done
+              docker compose ps
+              docker compose logs --tail 80 api
+              return 1
+            }
+
+            case "$DEPLOY_PLAN" in
+              none)
+                docker compose ps
+                ;;
+              api)
+                docker compose up -d --build --no-deps api
+                wait_api
+                reload_nginx
+                ;;
+              nginx)
+                docker compose up -d --no-deps nginx
+                reload_nginx
+                ;;
+              api,nginx)
+                docker compose up -d --build --no-deps api
+                wait_api
+                docker compose up -d --no-deps nginx
+                reload_nginx
+                ;;
+              all)
+                docker compose pull
+                docker compose up -d --build
+                wait_api
+                reload_nginx
+                ;;
+            esac
+            docker compose ps

@@ -1,18 +1,22 @@
-# Этот файл описывает, ЧТО GitHub делает с кодом. Сами секреты сюда не пишем.
-# Проверки — только на PR. Иначе после merge push в main гоняет их второй раз.
-# Деплой — только push в main, без needs на проверки: skipped job блокирует зависимые.
+# Проверки. На pull request файл запускается сам.
+# Перед выкладкой его вызывает cd.yml через workflow_call.
 
 name: ci
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
+  workflow_call:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test-and-build:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -35,8 +39,9 @@ jobs:
           cache-to: type=gha,mode=max
 
   gitleaks:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Check out full history
         uses: actions/checkout@v4
@@ -46,15 +51,13 @@ jobs:
       - name: Scan for secrets
         uses: gitleaks/gitleaks-action@v2
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
 
   trivy:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       actions: write
-      security-events: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -85,22 +88,6 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "0"
-
-      - name: Write Trivy SARIF
-        if: always()
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: image
-          image-ref: aboutme:${{ github.sha }}
-          format: sarif
-          output: trivy-results.sarif
-          scanners: vuln
-          vuln-type: os,library
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          limit-severities-for-sarif: true
-          exit-code: "0"
-          skip-setup-trivy: true
 
       - name: Publish Trivy findings
         if: always()
@@ -189,43 +176,5 @@ jobs:
                   print("::warning title=Trivy HIGH::{}".format(message))
 
           print(summary)
-          for row in rows:
-              print(
-                  "{:<10} {:<28} {:<18} {:<18} {}".format(
-                      row["severity"],
-                      row["pkg"],
-                      row["installed"],
-                      row["fixed"],
-                      row["cve"],
-                  )
-              )
           sys.exit(1 if counts["CRITICAL"] else 0)
           PY
-
-      - name: Upload Trivy SARIF
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-results.sarif
-          category: trivy
-
-  deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1.2.2
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          command_timeout: 45m
-          script: |
-            set -euo pipefail
-            cd ~/app/aboutme
-            git fetch origin
-            git checkout main
-            git pull origin main
-            docker compose pull
-            docker compose up -d --build
-            docker compose ps
