@@ -3,6 +3,8 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+import json
+
 from fastapi.responses import JSONResponse
 
 from app import auth, db, schemas
@@ -40,16 +42,18 @@ async def _read_limited(request: Request) -> bytes:
             raise HTTPException(status_code=400, detail="invalid json") from exc
         if size > MAX_JSON_BYTES:
             raise HTTPException(status_code=413, detail="payload too large")
-    raw = await request.body()
-    if len(raw) > MAX_JSON_BYTES:
-        raise HTTPException(status_code=413, detail="payload too large")
-    return raw
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAX_JSON_BYTES:
+            raise HTTPException(status_code=413, detail="payload too large")
+    return bytes(body)
 
 
 async def _json_body(request: Request) -> Any:
-    await _read_limited(request)
+    raw = await _read_limited(request)
     try:
-        return await request.json()
+        return json.loads(raw)
     except Exception as exc:
         raise HTTPException(status_code=400, detail="invalid json") from exc
 
@@ -62,9 +66,9 @@ def _parse_or_422(parse, raw: Any) -> Any:
 
 
 async def _login_body(request: Request) -> tuple[str, str] | None:
-    await _read_limited(request)
+    raw = await _read_limited(request)
     try:
-        body = await request.json()
+        body = json.loads(raw)
     except Exception:
         return None
     if not isinstance(body, dict):
