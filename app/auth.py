@@ -326,16 +326,12 @@ def clear_session_cookie(response: Response, request: Request) -> None:
 async def login_allowed(ip: str) -> None:
     if is_locked(ip):
         raise HTTPException(status_code=429, detail="too many attempts")
+    register_failure(ip)
 
 
 async def reject_login(ip: str) -> NoReturn:
-    register_failure(ip)
     if FAIL_DELAY_SEC:
         await asyncio.sleep(FAIL_DELAY_SEC)
     raise HTTPException(status_code=401, detail="unauthorized")
 
 
-if __name__ == "__main__":
-    import getpass
-
-    print(hash_password(getpass.getpass("Password: ")))
