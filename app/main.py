@@ -40,10 +40,13 @@ async def _read_limited(request: Request) -> bytes:
             raise HTTPException(status_code=400, detail="invalid json") from exc
         if size > MAX_JSON_BYTES:
             raise HTTPException(status_code=413, detail="payload too large")
-    raw = await request.body()
-    if len(raw) > MAX_JSON_BYTES:
-        raise HTTPException(status_code=413, detail="payload too large")
-    return raw
+    body = b""
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_JSON_BYTES:
+            raise HTTPException(status_code=413, detail="payload too large")
+    request._body = body
+    return body
 
 
 async def _json_body(request: Request) -> Any:
