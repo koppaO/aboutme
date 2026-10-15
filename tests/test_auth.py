@@ -273,7 +273,7 @@ def test_put_me_localized_and_timeline_roundtrip() -> None:
     saved = _me_with(
         headline={"ru": "Привет", "en": "Hi", "de": "Hallo"},
         timeline=[_event(), _event(start="2025-09", end="2026", kind="project")],
-        now_playing=_track(src="https://cdn.example.com/a.mp3", cover="/media/c.webp"),
+        now_playing=_track(src="/media/a.mp3", cover="/media/c.webp"),
     )
     assert saved.status_code == 200
     body = saved.json()
@@ -281,7 +281,7 @@ def test_put_me_localized_and_timeline_roundtrip() -> None:
     assert body["timeline"][0]["title"] == {"ru": "Uni", "en": ""}
     assert body["timeline"][0]["end"] is None
     assert [e["kind"] for e in body["timeline"]] == ["study", "project"]
-    assert body["now_playing"]["src"] == "https://cdn.example.com/a.mp3"
+    assert body["now_playing"]["src"] == "/media/a.mp3"
     assert client.get("/me").json() == body
 
 
@@ -312,6 +312,8 @@ def test_put_me_timeline_title_required_422() -> None:
         "/etc/passwd",
         "javascript:alert(1)",
         "http://example.com/a.mp3",
+        "https://cdn.example.com/a.mp3",
+        "HTTPS://cdn.example.com/media/a.mp3",
         "https://example.com/../a.mp3",
         "https://user:pw@example.com/a.mp3",
         "https://",
