@@ -1,6 +1,6 @@
 import pytest
 
-from app import schemas
+from app import auth, schemas
 from app.content import seed_theme
 
 
@@ -150,3 +150,8 @@ def test_skills_limit() -> None:
         _about_with_skills(skills + [{"name": "one-more", "kind": "tool"}])
     with pytest.raises(schemas.PayloadError):
         _about_with_skills({"name": "Python", "kind": "language"})
+
+
+def test_default_hash_iterations() -> None:
+    assert auth.HASH_ITERATIONS == 600_000
+    assert auth.hash_iterations(auth.hash_password("x", iterations=auth.HASH_ITERATIONS)) == 600_000

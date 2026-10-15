@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -491,19 +492,170 @@ def test_placeholder_session_secret_cannot_login(monkeypatch) -> None:
     assert "session=" not in response.headers.get("set-cookie", "").lower()
 
 
-def test_session_rejected_when_password_tag_mismatches() -> None:
+def test_session_rejected_when_password_changes() -> None:
     assert _login().status_code == 200
     user = db.get_user_by_login(LOGIN)
     assert user is not None
-    token = auth.make_session(LOGIN, user["password_hash"])
-    assert token is not None
-    payload, _sig = token.rsplit(".", 1)
-    kind, login, exp, _tag = payload.split(".")
-    bad_payload = f"{kind}.{login}.{exp}.{'0' * 16}"
-    bad_sig = hmac.new(b"s" * 32, bad_payload.encode(), hashlib.sha256).hexdigest()
-    client.cookies.clear()
-    client.cookies.set("session", f"{bad_payload}.{bad_sig}", domain="koppa0.dev")
+    db.set_password_hash(user["id"], auth.hash_password("new-password", iterations=2))
     assert client.get("/session").status_code == 401
+
+
+def test_old_signed_cookie_format_is_rejected() -> None:
+    expires = int(time.time()) + 3600
+    payload = f"user.{LOGIN}.{expires}.{'0' * 16}"
+    sig = hmac.new(b"s" * 32, payload.encode(), hashlib.sha256).hexdigest()
+    client.cookies.set("session", f"{payload}.{sig}", domain="koppa0.dev")
+    assert client.get("/session").status_code == 401
+
+
+def _cookie() -> str:
+    value = client.cookies.get("session")
+    assert value
+    return value
+
+
+def test_token_is_random_and_only_its_hash_is_stored() -> None:
+    assert _login().status_code == 200
+    token = _cookie()
+    assert LOGIN not in token
+    assert len(token) >= 43
+    stored = db._memory["sessions"]
+    assert token not in stored
+    assert hashlib.sha256(token.encode()).hexdigest() in stored
+
+
+def test_logout_revokes_the_cookie() -> None:
+    assert _login().status_code == 200
+    token = _cookie()
+    assert client.post("/logout", headers=ORIGIN).status_code == 200
+    client.cookies.set("session", token, domain="koppa0.dev")
+    assert client.get("/session").status_code == 401
+    assert client.put("/theme", json=seed_theme(), headers=ORIGIN).status_code == 401
+    assert db._memory["sessions"] == {}
+
+
+def test_two_sessions_are_independent() -> None:
+    other = TestClient(app, base_url="https://koppa0.dev")
+    assert _login().status_code == 200
+    second = other.post("/login", json={"login": LOGIN, "password": PASSWORD}, headers=ORIGIN)
+    assert second.status_code == 200
+    assert other.cookies.get("session") != _cookie()
+    assert other.post("/logout", headers=ORIGIN).status_code == 200
+    assert other.get("/session").status_code == 401
+    assert client.get("/session").status_code == 200
+
+
+def test_expired_session_401(monkeypatch) -> None:
+    assert _login().status_code == 200
+    later = time.time() + auth.SESSION_TTL_SEC + 1
+    monkeypatch.setattr(auth, "_now", lambda: later)
+    assert client.get("/session").status_code == 401
+
+
+def test_login_purges_expired_sessions(monkeypatch) -> None:
+    assert _login().status_code == 200
+    assert len(db._memory["sessions"]) == 1
+    later = time.time() + auth.SESSION_TTL_SEC + 1
+    monkeypatch.setattr(auth, "_now", lambda: later)
+    client.cookies.clear()
+    assert _login().status_code == 200
+    assert len(db._memory["sessions"]) == 1
+    assert client.get("/session").status_code == 200
+
+
+def _login_from(ip: str, login: str = LOGIN, password: str = PASSWORD):
+    return client.post(
+        "/login",
+        json={"login": login, "password": password},
+        headers={**ORIGIN, "X-Real-IP": ip},
+    )
+
+
+def test_login_lockout_spans_ips(monkeypatch) -> None:
+    monkeypatch.setenv("TRUST_PROXY", "1")
+    for i in range(auth.LOGIN_MAX_FAILURES):
+        assert _login_from(f"198.51.100.{i}", password="wrong").status_code == 401
+    assert _login_from("198.51.100.200").status_code == 429
+    assert _login_from("198.51.100.201", login=" ADMIN ").status_code == 429
+    assert "session" not in client.cookies
+
+
+def test_locked_login_skips_password_check(monkeypatch) -> None:
+    monkeypatch.setenv("TRUST_PROXY", "1")
+    for i in range(auth.LOGIN_MAX_FAILURES):
+        _login_from(f"198.51.100.{i}", password="wrong")
+    calls = []
+    monkeypatch.setattr(auth, "verify_password", lambda *args: calls.append(args) or True)
+    assert _login_from("198.51.100.99").status_code == 429
+    assert calls == []
+
+
+def test_unknown_login_locks_the_same_way(monkeypatch) -> None:
+    monkeypatch.setenv("TRUST_PROXY", "1")
+    known, unknown = [], []
+    for i in range(auth.LOGIN_MAX_FAILURES + 1):
+        known.append(_login_from(f"198.51.100.{i}", password="wrong"))
+        unknown.append(_login_from(f"203.0.113.{i}", login="ghost", password="wrong"))
+    assert [r.status_code for r in known] == [r.status_code for r in unknown]
+    assert known[-1].status_code == 429
+    assert known[-1].json() == unknown[-1].json()
+    assert known[0].json() == unknown[0].json()
+
+
+def test_success_resets_login_counter(monkeypatch) -> None:
+    monkeypatch.setenv("TRUST_PROXY", "1")
+    for i in range(auth.LOGIN_MAX_FAILURES - 1):
+        assert _login_from(f"198.51.100.{i}", password="wrong").status_code == 401
+    assert _login_from("198.51.100.50").status_code == 200
+    for i in range(auth.LOGIN_MAX_FAILURES - 1):
+        assert _login_from(f"192.0.2.{i}", password="wrong").status_code == 401
+    assert _login_from("192.0.2.50").status_code == 200
+
+
+def test_login_lock_expires(monkeypatch) -> None:
+    monkeypatch.setenv("TRUST_PROXY", "1")
+    for i in range(auth.LOGIN_MAX_FAILURES):
+        _login_from(f"198.51.100.{i}", password="wrong")
+    assert _login_from("198.51.100.77").status_code == 429
+    later = time.time() + auth.LOGIN_LOCKOUT_SEC + 1
+    monkeypatch.setattr(auth, "_now", lambda: later)
+    assert _login_from("198.51.100.78").status_code == 200
+
+
+def test_tracked_logins_are_bounded(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "MAX_TRACKED_LOGINS", 5)
+    for i in range(20):
+        auth.register_login_failure(f"user{i}")
+    assert len(auth._login_attempts) <= 5
+
+
+def test_login_upgrades_weak_hash(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "HASH_ITERATIONS", 600_000)
+    weak = auth.hash_password("weak-user-pass", iterations=200_000)
+    db.create_user("legacy", weak, "admin")
+    old_session = auth.make_session(db.get_user_by_login("legacy"))
+    assert old_session is not None
+
+    response = client.post(
+        "/login",
+        json={"login": "legacy", "password": "weak-user-pass"},
+        headers=ORIGIN,
+    )
+    assert response.status_code == 200
+    stored = db.get_user_by_login("legacy")["password_hash"]
+    assert auth.hash_iterations(stored) == 600_000
+    assert auth.verify_password("weak-user-pass", stored)
+    assert client.get("/session").json()["login"] == "legacy"
+
+    stale = TestClient(app, base_url="https://koppa0.dev")
+    stale.cookies.set("session", old_session, domain="koppa0.dev")
+    assert stale.get("/session").status_code == 401
+
+
+def test_strong_hash_is_not_rewritten() -> None:
+    before = db.get_user_by_login(LOGIN)["password_hash"]
+    assert _login().status_code == 200
+    assert db.get_user_by_login(LOGIN)["password_hash"] == before
 
 
 def test_put_rejects_oversized_body() -> None:
