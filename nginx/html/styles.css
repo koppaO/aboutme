@@ -7,6 +7,19 @@
   font-display: swap;
 }
 
+/* В Mona Sans нет кириллицы, поэтому кириллица берётся из Onest. unicode-range
+   не даёт Onest перехватить латиницу, и браузер не скачает его для английской страницы. */
+@font-face {
+  font-family: "Onest";
+  src: url("/vendor/fonts/onest-2.001/OnestVF.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  /* Строчные у шрифтов совпадают, прописные у Onest ниже на ~3%: делим разницу. */
+  size-adjust: 101.5%;
+  unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
 @font-face {
   font-family: "Monaspace Neon";
   src: url("/vendor/fonts/monaspace-1.400/MonaspaceNeonVar.woff2") format("woff2");
@@ -29,21 +42,13 @@
   --glitch-a: hsl(328 100% 44%);
   --glitch-b: hsl(196 100% 34%);
 
-  --sans: "Mona Sans", "Segoe UI", system-ui, sans-serif;
-  --text: var(--sans);
+  --sans: "Mona Sans", "Onest", "Segoe UI", system-ui, sans-serif;
   --mono: "Monaspace Neon", ui-monospace, "Cascadia Mono", Consolas, monospace;
   --gutter: clamp(16px, 3.2vw, 40px);
   --rule: 1px solid var(--line);
   --head-h: 3.25rem;
 
   color-scheme: light;
-}
-
-/* В Mona Sans нет кириллицы. Чтобы во фразе «бэкенд на FastAPI» не смешивались
-   два рисунка букв, русский текст целиком идёт системным шрифтом, а Mona Sans
-   остаётся за латинскими именами: koppaO, бренд, названия проектов. */
-:root:lang(ru) {
-  --text: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
 [data-theme="dark"] {
@@ -81,7 +86,7 @@ body {
   min-height: 100vh;
   color: var(--ink);
   background: var(--bg);
-  font-family: var(--text);
+  font-family: var(--sans);
   font-size: 1.0625rem;
   font-stretch: 100%;
   line-height: 1.55;
@@ -218,7 +223,6 @@ body.is-ready .preloader {
 }
 
 .brand {
-  font-family: var(--sans);
   padding-left: var(--gutter) !important;
   font-weight: 750;
   font-stretch: 118%;
@@ -341,7 +345,6 @@ body.is-ready .preloader {
 
 h1 {
   margin: 0;
-  font-family: var(--sans);
   font-size: clamp(4rem, 15.5vw, 10rem);
   font-weight: 850;
   font-stretch: 125%;
@@ -799,7 +802,6 @@ h3 {
   padding: 1rem var(--gutter);
   background: none;
   border: 0;
-  font-family: var(--sans);
   font-size: clamp(1.375rem, 2.6vw, 2.125rem);
   font-weight: 700;
   font-stretch: 118%;
@@ -884,7 +886,6 @@ h3 {
 
 .card h3 {
   margin: 0 0 0.6rem;
-  font-family: var(--sans);
   font-size: 1.5rem;
   font-weight: 700;
   font-stretch: 118%;
