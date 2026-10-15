@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="referrer" content="same-origin" />
+    <title>Админка · koppaO</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/admin.css" />
+    <script src="/theme.js"></script>
+  </head>
+  <body class="admin">
+    <a class="skip" href="#main">К содержимому</a>
+    <header class="masthead">
+      <a class="brand" href="/">koppaO</a>
+      <nav class="nav" id="admin-nav" aria-label="Разделы админки"></nav>
+      <div class="controls">
+        <button type="button" class="theme-toggle" data-theme-toggle aria-pressed="false">
+          <span class="swatch" aria-hidden="true"></span>
+          <span class="theme-label">Тёмная тема</span>
+        </button>
+        <button type="button" id="logout" class="logout" hidden>Выйти</button>
+      </div>
+    </header>
+
+    <main class="page" id="main">
+      <section class="hero is-short" aria-labelledby="admin-title">
+        <h1 id="admin-title">Админка</h1>
+        <p class="hero-sub" id="whoami">Проверяю вход…</p>
+      </section>
+      <p id="status" class="status admin-status" role="alert" hidden></p>
+
+      <section class="row" id="me-section" aria-labelledby="me-title" hidden>
+        <h2 id="me-title" class="row-title">О себе</h2>
+        <div class="row-body" data-slot></div>
+      </section>
+      <section class="row" id="projects-section" aria-labelledby="projects-title" hidden>
+        <h2 id="projects-title" class="row-title">Проекты</h2>
+        <div class="row-body" data-slot></div>
+      </section>
+      <section class="row" id="theme-section" aria-labelledby="theme-title" hidden>
+        <h2 id="theme-title" class="row-title">Тема</h2>
+        <div class="row-body" data-slot></div>
+      </section>
+      <section class="row" id="users-section" aria-labelledby="users-title" hidden>
+        <h2 id="users-title" class="row-title">Пользователи</h2>
+        <div class="row-body" data-slot></div>
+      </section>
+    </main>
+    <script src="/admin.js"></script>
+  </body>
+</html>
