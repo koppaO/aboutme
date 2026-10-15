@@ -1,8 +1,14 @@
+"""Login, sessions and rights.
+
+Trade-off: anyone who knows a login can lock it out for LOGIN_LOCKOUT_SEC by failing on purpose.
+"""
+
 import asyncio
 import functools
 import hashlib
 import hmac
 import os
+import secrets
 import time
 from typing import Any, NoReturn
 from urllib.parse import urlparse
@@ -12,13 +18,21 @@ from fastapi import HTTPException, Request, Response
 COOKIE_NAME = "session"
 ALLOWED_ORIGIN = "https://koppa0.dev"
 SESSION_TTL_SEC = 60 * 60 * 24
+SESSION_TOKEN_BYTES = 32
+MAX_TOKEN_LEN = 128
 HASH_SCHEME = "pbkdf2_sha256"
-HASH_ITERATIONS = 200_000
+HASH_ITERATIONS = 600_000
 MIN_SECRET_LEN = 16
+# По IP: 5 неудач подряд закрывают вход с этого адреса на минуту.
 MAX_FAILURES = 5
 LOCKOUT_SEC = 60
-FAIL_DELAY_SEC = 0.4
 MAX_TRACKED_IPS = 4096
+# По логину: 10 неудач за 15 минут закрывают этот логин на 15 минут с любого адреса.
+LOGIN_MAX_FAILURES = 10
+LOGIN_WINDOW_SEC = 15 * 60
+LOGIN_LOCKOUT_SEC = 15 * 60
+MAX_TRACKED_LOGINS = 4096
+FAIL_DELAY_SEC = 0.4
 _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1"})
 _PLACEHOLDER_SECRETS = frozenset(
     {
@@ -29,6 +43,11 @@ _PLACEHOLDER_SECRETS = frozenset(
 )
 
 _attempts: dict[str, dict[str, Any]] = {}
+_login_attempts: dict[str, dict[str, Any]] = {}
+
+
+def _now() -> float:
+    return time.time()
 
 
 def hash_password(
@@ -69,6 +88,11 @@ def hash_format_ok(encoded: str) -> bool:
     return _parse_hash(encoded) is not None
 
 
+def hash_iterations(encoded: str) -> int | None:
+    parsed = _parse_hash(encoded)
+    return None if parsed is None else parsed[0]
+
+
 def verify_password(password: str, encoded: str) -> bool:
     parsed = _parse_hash(encoded)
     if parsed is None:
@@ -83,9 +107,10 @@ def verify_password(password: str, encoded: str) -> bool:
     return hmac.compare_digest(actual, expected)
 
 
-@functools.lru_cache(maxsize=1)
-def _dummy_hash() -> str:
-    return hash_password("invalid", salt=b"\x00" * 16, iterations=HASH_ITERATIONS)
+# Ключ кэша — число итераций: неизвестный логин проверяется так же долго, как настоящий.
+@functools.lru_cache(maxsize=2)
+def _dummy_hash(iterations: int) -> str:
+    return hash_password("invalid", salt=b"\x00" * 16, iterations=iterations)
 
 
 def authenticate(login: str, password: str) -> dict[str, Any] | None:
@@ -93,12 +118,19 @@ def authenticate(login: str, password: str) -> dict[str, Any] | None:
 
     user = db.get_user_by_login(login)
     if user is None:
-        verify_password(password, _dummy_hash())
+        verify_password(password, _dummy_hash(HASH_ITERATIONS))
         return None
     if not verify_password(password, user["password_hash"]):
         return None
     if not user["status"]:
         return None
+    iterations = hash_iterations(user["password_hash"])
+    if iterations is not None and iterations < HASH_ITERATIONS:
+        # Открытый пароль есть только сейчас, поэтому слабый хэш усиливаем при входе.
+        # Тег сессий считается от хэша: прежние сессии этого пользователя перестают действовать.
+        upgraded = hash_password(password, iterations=HASH_ITERATIONS)
+        db.set_password_hash(int(user["id"]), upgraded)
+        user = {**user, "password_hash": upgraded}
     return user
 
 
@@ -120,57 +152,53 @@ def _password_tag(password_hash: str) -> str | None:
     return hmac.new(secret, password_hash.encode("utf-8"), hashlib.sha256).hexdigest()[:16]
 
 
-def make_session(login: str, password_hash: str) -> str | None:
-    secret = _secret()
-    tag = _password_tag(password_hash)
-    if secret is None or tag is None:
-        return None
-    expires = int(time.time()) + SESSION_TTL_SEC
-    payload = f"user.{login}.{expires}.{tag}"
-    sig = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
-    return f"{payload}.{sig}"
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def session_claims(token: str) -> tuple[str, str] | None:
-    secret = _secret()
-    if secret is None or not token:
+def make_session(user: dict[str, Any]) -> str | None:
+    """Store a new session and return its token; only the token's sha256 is stored."""
+    from app import db
+
+    tag = _password_tag(user["password_hash"])
+    if tag is None:
         return None
-    try:
-        payload, sig = token.rsplit(".", 1)
-    except ValueError:
+    now = _now()
+    db.purge_sessions(now)
+    token = secrets.token_urlsafe(SESSION_TOKEN_BYTES)
+    db.create_session(_token_hash(token), int(user["id"]), tag, now, now + SESSION_TTL_SEC)
+    return token
+
+
+def _session_token(request: Request) -> str | None:
+    token = request.cookies.get(COOKIE_NAME)
+    if not token or len(token) > MAX_TOKEN_LEN:
         return None
-    expected = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(sig, expected):
-        return None
-    try:
-        kind, login, exp_s, tag = payload.split(".")
-        expires = int(exp_s)
-    except ValueError:
-        return None
-    if kind != "user" or not login or expires < int(time.time()):
-        return None
-    if len(tag) != 16:
-        return None
-    return login, tag
+    return token
 
 
 def current_user(request: Request) -> dict[str, Any] | None:
     from app import db
 
-    token = request.cookies.get(COOKIE_NAME)
-    if not token:
+    token = _session_token(request)
+    if token is None:
         return None
-    claims = session_claims(token)
-    if claims is None:
+    row = db.get_session(_token_hash(token))
+    if row is None or row["expires_at"] <= _now():
         return None
-    login, tag = claims
-    user = db.get_user_by_login(login)
-    if user is None:
-        return None
+    user = row["user"]
     expected = _password_tag(user["password_hash"])
-    if expected is None or not hmac.compare_digest(tag, expected):
+    if expected is None or not hmac.compare_digest(row["password_tag"], expected):
         return None
     return user
+
+
+def end_session(request: Request) -> None:
+    from app import db
+
+    token = _session_token(request)
+    if token is not None:
+        db.delete_session(_token_hash(token))
 
 
 def client_ip(request: Request) -> str:
@@ -185,6 +213,7 @@ def client_ip(request: Request) -> str:
 
 def reset_rate_limits() -> None:
     _attempts.clear()
+    _login_attempts.clear()
 
 
 def _prune_attempts(now: float) -> None:
@@ -244,6 +273,57 @@ def register_failure(ip: str) -> None:
 
 def clear_failures(ip: str) -> None:
     _attempts.pop(ip, None)
+
+
+def login_key(login: str) -> str:
+    return login.strip().lower()
+
+
+def _recent(fails: list[float], now: float) -> list[float]:
+    return [moment for moment in fails if now - moment < LOGIN_WINDOW_SEC]
+
+
+def _prune_login_attempts(now: float) -> None:
+    stale = [
+        key
+        for key, row in _login_attempts.items()
+        if row["locked_until"] <= now and not _recent(row["fails"], now)
+    ]
+    for key in stale:
+        _login_attempts.pop(key, None)
+    if len(_login_attempts) <= MAX_TRACKED_LOGINS:
+        return
+    # Заблокированные логины не вытесняем, иначе поток мусорных логинов снимал бы блокировку.
+    unlocked = sorted(
+        (key for key, row in _login_attempts.items() if row["locked_until"] <= now),
+        key=lambda key: _login_attempts[key]["seen"],
+    )
+    for key in unlocked:
+        if len(_login_attempts) <= MAX_TRACKED_LOGINS:
+            break
+        _login_attempts.pop(key, None)
+
+
+def login_locked(login: str) -> bool:
+    row = _login_attempts.get(login_key(login))
+    return bool(row) and row["locked_until"] > _now()
+
+
+def register_login_failure(login: str) -> None:
+    now = _now()
+    key = login_key(login)
+    row = _login_attempts.setdefault(key, {"fails": [], "locked_until": 0.0, "seen": now})
+    row["seen"] = now
+    row["fails"] = _recent(row["fails"], now)
+    row["fails"].append(now)
+    if len(row["fails"]) >= LOGIN_MAX_FAILURES:
+        row["locked_until"] = now + LOGIN_LOCKOUT_SEC
+        row["fails"] = []
+    _prune_login_attempts(now)
+
+
+def clear_login_failures(login: str) -> None:
+    _login_attempts.pop(login_key(login), None)
 
 
 def _origin_hostname(origin: str) -> str | None:
@@ -328,8 +408,16 @@ async def login_allowed(ip: str) -> None:
         raise HTTPException(status_code=429, detail="too many attempts")
 
 
-async def reject_login(ip: str) -> NoReturn:
+async def login_name_allowed(login: str) -> None:
+    # Один ответ для любого логина, есть он или нет. Пароль при блокировке не проверяем.
+    if login_locked(login):
+        raise HTTPException(status_code=429, detail="too many attempts")
+
+
+async def reject_login(ip: str, login: str | None = None) -> NoReturn:
     register_failure(ip)
+    if login is not None:
+        register_login_failure(login)
     if FAIL_DELAY_SEC:
         await asyncio.sleep(FAIL_DELAY_SEC)
     raise HTTPException(status_code=401, detail="unauthorized")

@@ -5,6 +5,7 @@ import os
 import re
 import threading
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from queue import Empty, Queue
 from typing import Any, Iterator
 from urllib.parse import quote_plus
@@ -191,6 +192,7 @@ def _empty_rbac() -> dict[str, Any]:
         "resources": resources,
         "role_resources": {(1, resource_id) for resource_id in resources},
         "users": {},
+        "sessions": {},
         "ids": {"roles": 2, "resources": len(RESOURCE_KEYS) + 1, "users": 1},
     }
 
@@ -346,6 +348,21 @@ def _init_postgres(url: str) -> None:
             )
             """
         )
+        # Храним только sha256 от токена: утечка таблицы не даёт войти.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                id_hash TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+                password_tag TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions (expires_at)"
+        )
         exists = conn.execute(
             "SELECT 1 FROM site_state WHERE id = %s",
             (SITE_ROW_ID,),
@@ -415,7 +432,7 @@ def reload_seed() -> None:
                 ),
             )
             conn.execute(
-                "TRUNCATE users, role_resources, resources, roles RESTART IDENTITY CASCADE"
+                "TRUNCATE sessions, users, role_resources, resources, roles RESTART IDENTITY CASCADE"
             )
             _seed_catalogs_postgres(conn)
             _seed_first_admin_postgres(conn)
@@ -709,3 +726,104 @@ def set_user_status(login: str, status: bool) -> None:
     user = _memory["users"].get(login)
     if user is not None:
         user["status"] = status
+
+
+def set_password_hash(user_id: int, password_hash: str) -> None:
+    ensure_site_state()
+    if _postgres:
+        with _pg() as conn:
+            conn.execute(
+                "UPDATE users SET password_hash = %s WHERE id = %s",
+                (password_hash, user_id),
+            )
+        return
+    assert _memory is not None
+    for user in _memory["users"].values():
+        if user["id"] == user_id:
+            user["password_hash"] = password_hash
+
+
+def _utc(epoch: float) -> datetime:
+    return datetime.fromtimestamp(epoch, tz=timezone.utc)
+
+
+def create_session(id_hash: str, user_id: int, password_tag: str, created: float, expires: float) -> None:
+    ensure_site_state()
+    if _postgres:
+        with _pg() as conn:
+            conn.execute(
+                """
+                INSERT INTO sessions (id_hash, user_id, password_tag, created_at, expires_at)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (id_hash, user_id, password_tag, _utc(created), _utc(expires)),
+            )
+        return
+    assert _memory is not None
+    _memory["sessions"][id_hash] = {
+        "user_id": user_id,
+        "password_tag": password_tag,
+        "created_at": created,
+        "expires_at": expires,
+    }
+
+
+def get_session(id_hash: str) -> dict[str, Any] | None:
+    """Session row joined with its user, or None. expires_at is a Unix time."""
+    ensure_site_state()
+    if _postgres:
+        with _pg() as conn:
+            row = conn.execute(
+                """
+                SELECT s.password_tag, s.expires_at,
+                       u.id, u.login, u.password_hash, u.status, u.role_id
+                FROM sessions s
+                JOIN users u ON u.id = s.user_id
+                WHERE s.id_hash = %s
+                """,
+                (id_hash,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "password_tag": row[0],
+            "expires_at": row[1].timestamp(),
+            "user": _user_from_row(row[2:]),
+        }
+    assert _memory is not None
+    stored = _memory["sessions"].get(id_hash)
+    if stored is None:
+        return None
+    user = next(
+        (item for item in _memory["users"].values() if item["id"] == stored["user_id"]),
+        None,
+    )
+    if user is None:
+        return None
+    return {
+        "password_tag": stored["password_tag"],
+        "expires_at": stored["expires_at"],
+        "user": copy.deepcopy(user),
+    }
+
+
+def delete_session(id_hash: str) -> None:
+    ensure_site_state()
+    if _postgres:
+        with _pg() as conn:
+            conn.execute("DELETE FROM sessions WHERE id_hash = %s", (id_hash,))
+        return
+    assert _memory is not None
+    _memory["sessions"].pop(id_hash, None)
+
+
+def purge_sessions(now: float) -> None:
+    ensure_site_state()
+    if _postgres:
+        with _pg() as conn:
+            conn.execute("DELETE FROM sessions WHERE expires_at <= %s", (_utc(now),))
+        return
+    assert _memory is not None
+    expired = [key for key, row in _memory["sessions"].items() if row["expires_at"] <= now]
+    for key in expired:
+        _memory["sessions"].pop(key, None)
