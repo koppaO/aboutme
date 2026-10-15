@@ -80,23 +80,12 @@ function safeUrl(raw) {
   }
 }
 
-// Плеер берёт файлы только со своего /media/ или по https, как в контракте api.
+// Плеер берёт файлы только со своего /media/: CSP всё равно не пустит внешние адреса.
 function mediaUrl(raw) {
-  if (typeof raw !== "string" || !raw || raw.length > 500) {
+  if (typeof raw !== "string" || raw.length > 500 || !MEDIA_PATH.test(raw) || raw.includes("..")) {
     return null;
   }
-  if (MEDIA_PATH.test(raw) && !raw.includes("..")) {
-    return raw;
-  }
-  if (!raw.startsWith("https://")) {
-    return null;
-  }
-  try {
-    const url = new URL(raw);
-    return url.protocol === "https:" && !url.username && !url.password ? url.href : null;
-  } catch (err) {
-    return null;
-  }
+  return raw;
 }
 
 function cssVar(name) {
