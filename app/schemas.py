@@ -3,7 +3,9 @@ from typing import Any
 from urllib.parse import urlparse
 
 COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
-COLOR_KEYS = ("--shade", "--text", "--muted", "--gold", "--fail")
+COLOR_KEYS = ("--bg", "--ink", "--muted", "--line", "--panel", "--signal")
+THEME_MODES = ("light", "dark")
+LEGACY_THEME_KEYS = ("sun", "grain", "tree")
 
 MAX_NAME = 100
 MAX_HEADLINE = 200
@@ -21,7 +23,16 @@ MAX_LINKS = 10
 MAX_LOGIN = 32
 MIN_PASSWORD = 8
 MAX_PASSWORD = 256
+MAX_TIMELINE = 30
+MAX_DATE = 20
+MAX_TRACK = 200
+MAX_SKILLS = 40
+MAX_SKILL = 50
 LOGIN_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
+MEDIA_RE = re.compile(r"^/media/[A-Za-z0-9._-]+$")
+TIMELINE_KINDS = frozenset({"study", "work", "project"})
+SKILL_KINDS = frozenset({"language", "framework", "database", "infra", "tool"})
+LANGS = ("ru", "en")
 
 
 class PayloadError(ValueError):
@@ -34,13 +45,21 @@ def _clip(value: Any, limit: int) -> str:
     return value.strip()[:limit]
 
 
-def _number(value: Any, lo: float, hi: float) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise PayloadError("invalid number")
-    number = float(value)
-    if number < lo or number > hi:
-        raise PayloadError("invalid number")
-    return number
+def _localized(value: Any, limit: int, required: bool = False) -> dict[str, str]:
+    if value is None:
+        value = ""
+    if isinstance(value, str):
+        text = {"ru": _clip(value, limit), "en": ""}
+    elif isinstance(value, dict):
+        text = {}
+        for lang in LANGS:
+            part = value.get(lang)
+            text[lang] = _clip("" if part is None else part, limit)
+    else:
+        raise PayloadError("invalid text")
+    if required and not text["ru"]:
+        raise PayloadError("invalid text")
+    return text
 
 
 def _color(value: Any) -> str:
@@ -73,32 +92,106 @@ def _named_links(value: Any, limit: int) -> list[dict[str, str]]:
     return links
 
 
+def _media(value: Any) -> str:
+    if not isinstance(value, str):
+        raise PayloadError("invalid media")
+    src = value.strip()
+    if not src or len(src) > MAX_URL or ".." in src:
+        raise PayloadError("invalid media")
+    if not MEDIA_RE.fullmatch(src) or not src.rsplit("/", 1)[1].strip("."):
+        raise PayloadError("invalid media")
+    return src
+
+
+def _theme_colors(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, dict) or not isinstance(raw.get("colors"), dict):
+        raise PayloadError("invalid theme")
+    colors_raw = raw["colors"]
+    return {key: _color(colors_raw.get(key)) for key in COLOR_KEYS}
+
+
 def parse_theme(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise PayloadError("invalid theme")
-    colors_raw = raw.get("colors")
-    sun_raw = raw.get("sun")
-    grain_raw = raw.get("grain")
-    tree_raw = raw.get("tree")
-    if not isinstance(colors_raw, dict):
-        raise PayloadError("invalid theme")
-    if not isinstance(sun_raw, dict):
-        raise PayloadError("invalid theme")
-    if not isinstance(grain_raw, dict):
-        raise PayloadError("invalid theme")
-    if not isinstance(tree_raw, dict):
-        raise PayloadError("invalid theme")
+    return {mode: {"colors": _theme_colors(raw.get(mode))} for mode in THEME_MODES}
 
-    colors = {key: _color(colors_raw.get(key)) for key in COLOR_KEYS}
+
+def is_current_theme(raw: Any) -> bool:
+    if not isinstance(raw, dict) or any(key in raw for key in LEGACY_THEME_KEYS):
+        return False
+    try:
+        parse_theme(raw)
+    except PayloadError:
+        return False
+    return True
+
+
+def _timeline(value: Any) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > MAX_TIMELINE:
+        raise PayloadError("invalid timeline")
+    events: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise PayloadError("invalid timeline")
+        start = _clip(item.get("start"), MAX_DATE)
+        if not start:
+            raise PayloadError("invalid timeline")
+        end_raw = item.get("end")
+        end = None if end_raw is None else _clip(end_raw, MAX_DATE) or None
+        kind = item.get("kind")
+        if not isinstance(kind, str) or kind not in TIMELINE_KINDS:
+            raise PayloadError("invalid timeline")
+        events.append(
+            {
+                "start": start,
+                "end": end,
+                "title": _localized(item.get("title"), MAX_TITLE, required=True),
+                "place": _localized(item.get("place"), MAX_TITLE),
+                "kind": kind,
+            }
+        )
+    return events
+
+
+def _skills(value: Any) -> list[dict[str, str]]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > MAX_SKILLS:
+        raise PayloadError("invalid skills")
+    skills: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            raise PayloadError("invalid skills")
+        name = _clip(item.get("name"), MAX_SKILL)
+        kind = item.get("kind")
+        if not name or not isinstance(kind, str) or kind not in SKILL_KINDS:
+            raise PayloadError("invalid skills")
+        key = name.casefold()
+        if key in seen:
+            raise PayloadError("duplicate skill")
+        seen.add(key)
+        skills.append({"name": name, "kind": kind})
+    return skills
+
+
+def _now_playing(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise PayloadError("invalid now_playing")
+    title = _clip(value.get("title"), MAX_TRACK)
+    if not title:
+        raise PayloadError("invalid now_playing")
+    artist = value.get("artist")
+    cover = value.get("cover")
     return {
-        "colors": colors,
-        "sun": {
-            "top": _number(sun_raw.get("top"), -200, 200),
-            "right": _number(sun_raw.get("right"), -200, 200),
-            "size": _number(sun_raw.get("size"), 1, 200),
-        },
-        "grain": {"opacity": _number(grain_raw.get("opacity"), 0, 1)},
-        "tree": {"opacity": _number(tree_raw.get("opacity"), 0, 1)},
+        "title": title,
+        "artist": _clip("" if artist is None else artist, MAX_TRACK),
+        "src": _media(value.get("src")),
+        "cover": None if cover is None or cover == "" else _media(cover),
     }
 
 
@@ -110,9 +203,12 @@ def parse_about(raw: Any) -> dict[str, Any]:
         raise PayloadError("invalid about")
     return {
         "name": name,
-        "headline": _clip(raw.get("headline") or "", MAX_HEADLINE),
-        "about": _clip(raw.get("about") or "", MAX_ABOUT),
+        "headline": _localized(raw.get("headline"), MAX_HEADLINE),
+        "about": _localized(raw.get("about"), MAX_ABOUT),
         "socials": _named_links(raw.get("socials") or [], MAX_SOCIALS),
+        "timeline": _timeline(raw.get("timeline")),
+        "skills": _skills(raw.get("skills")),
+        "now_playing": _now_playing(raw.get("now_playing")),
     }
 
 
@@ -140,7 +236,7 @@ def parse_projects(raw: Any) -> dict[str, Any]:
             {
                 "slug": slug,
                 "title": title,
-                "description": _clip(item.get("description") or "", MAX_DESCRIPTION),
+                "description": _localized(item.get("description"), MAX_DESCRIPTION),
                 "stack": stack,
                 "links": _named_links(item.get("links") or [], MAX_LINKS),
             }

@@ -3,7 +3,10 @@
     {
       "slug": "aboutme",
       "title": "aboutme",
-      "description": "Личный сайт: описание, пет-проекты, ссылки. Backend на FastAPI, фронт за nginx.",
+      "description": {
+        "ru": "Личный сайт: описание, пет-проекты, ссылки. Backend на FastAPI, фронт за nginx.",
+        "en": "Personal site: about, side projects, links. FastAPI backend, static front behind nginx."
+      },
       "stack": ["FastAPI", "nginx", "Postgres", "Docker"],
       "links": [
         {

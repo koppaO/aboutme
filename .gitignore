@@ -1,11 +1,6 @@
 .env
 .env.*
 !.env.example
-bin/
-dist/
-*.exe
-*.test
-coverage.out
 .venv/
 venv/
 __pycache__/
@@ -14,3 +9,4 @@ __pycache__/
 .python-version
 nginx/certbot-www/.well-known/
 cookies.txt
+.claude/

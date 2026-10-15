@@ -111,15 +111,18 @@ async def login(request: Request) -> JSONResponse:
     ip = auth.client_ip(request)
     await auth.login_allowed(ip)
     pair = await _login_body(request)
-    user = None
-    if pair is not None:
-        user = await asyncio.to_thread(auth.authenticate, pair[0], pair[1])
+    if pair is None:
+        await auth.reject_login(ip)
+    login_name, password = pair
+    await auth.login_name_allowed(login_name)
+    user = await asyncio.to_thread(auth.authenticate, login_name, password)
     if user is None:
         await auth.reject_login(ip)
-    token = auth.make_session(user["login"], user["password_hash"])
+    token = await asyncio.to_thread(auth.make_session, user)
     if token is None:
         await auth.reject_login(ip)
     auth.clear_failures(ip)
+    auth.clear_login_failures(login_name)
     response = _json({"ok": True})
     auth.set_session_cookie(response, token, request)
     return response
@@ -128,6 +131,7 @@ async def login(request: Request) -> JSONResponse:
 @app.post("/logout")
 def logout(request: Request) -> JSONResponse:
     auth.require_origin(request)
+    auth.end_session(request)
     response = _json({"ok": True})
     auth.clear_session_cookie(response, request)
     return response
@@ -136,7 +140,8 @@ def logout(request: Request) -> JSONResponse:
 @app.get("/session")
 def session(request: Request) -> JSONResponse:
     user = auth.require_user(request)
-    return _json({"ok": True, "login": user["login"]})
+    resources = db.role_resources(int(user["role_id"]))
+    return _json({"ok": True, "login": user["login"], "resources": resources})
 
 
 @app.put("/theme")

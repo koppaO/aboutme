@@ -1,15 +1,18 @@
 import copy
 import json
+import logging
 import os
 import re
 import threading
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from queue import Empty, Queue
 from typing import Any, Iterator
 from urllib.parse import quote_plus
 
 import psycopg
 
+from app import schemas
 from app.content import seed_about, seed_projects, seed_theme
 
 SITE_ROW_ID = 1
@@ -26,6 +29,13 @@ _pool: Queue[psycopg.Connection] | None = None
 _pool_size = 0
 _pool_lock = threading.Lock()
 _pool_url: str | None = None
+_log = logging.getLogger(__name__)
+_SEEDS = {"theme": seed_theme, "about": seed_about, "projects": seed_projects}
+_PARSERS = {
+    "theme": schemas.parse_theme,
+    "about": schemas.parse_about,
+    "projects": schemas.parse_projects,
+}
 
 
 class DuplicateUser(Exception):
@@ -152,12 +162,23 @@ def database_status() -> str | None:
     return "ok"
 
 
+def _seed(column: str) -> Any:
+    return _PARSERS[column](_SEEDS[column]())
+
+
 def _blank_site() -> dict[str, Any]:
-    return {
-        "theme": seed_theme(),
-        "about": seed_about(),
-        "projects": seed_projects(),
-    }
+    return {column: _seed(column) for column in ("theme", "about", "projects")}
+
+
+def _normalize(column: str, value: Any) -> Any:
+    """Bring a stored value to the current API shape; old rows predate it."""
+    if column == "theme" and not schemas.is_current_theme(value):
+        return _seed(column)
+    try:
+        return _PARSERS[column](value)
+    except schemas.PayloadError:
+        _log.warning("stored %s does not match the current format, serving the seed", column)
+        return _seed(column)
 
 
 def _empty_rbac() -> dict[str, Any]:
@@ -171,6 +192,7 @@ def _empty_rbac() -> dict[str, Any]:
         "resources": resources,
         "role_resources": {(1, resource_id) for resource_id in resources},
         "users": {},
+        "sessions": {},
         "ids": {"roles": 2, "resources": len(RESOURCE_KEYS) + 1, "users": 1},
     }
 
@@ -259,6 +281,23 @@ def _seed_first_admin_postgres(conn) -> None:
     )
 
 
+def _upgrade_legacy_theme(conn) -> None:
+    row = conn.execute(
+        "SELECT theme FROM site_state WHERE id = %s",
+        (SITE_ROW_ID,),
+    ).fetchone()
+    if row is None or schemas.is_current_theme(row[0]):
+        return
+    conn.execute(
+        """
+        UPDATE site_state
+        SET theme = %s::jsonb, updated_at = NOW()
+        WHERE id = %s
+        """,
+        (json.dumps(_seed("theme")), SITE_ROW_ID),
+    )
+
+
 def _init_postgres(url: str) -> None:
     seed = _blank_site()
     with psycopg.connect(url) as conn:
@@ -309,6 +348,21 @@ def _init_postgres(url: str) -> None:
             )
             """
         )
+        # Храним только sha256 от токена: утечка таблицы не даёт войти.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                id_hash TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+                password_tag TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions (expires_at)"
+        )
         exists = conn.execute(
             "SELECT 1 FROM site_state WHERE id = %s",
             (SITE_ROW_ID,),
@@ -326,6 +380,8 @@ def _init_postgres(url: str) -> None:
                     json.dumps(seed["projects"]),
                 ),
             )
+        else:
+            _upgrade_legacy_theme(conn)
         _seed_catalogs_postgres(conn)
         _seed_first_admin_postgres(conn)
 
@@ -376,7 +432,7 @@ def reload_seed() -> None:
                 ),
             )
             conn.execute(
-                "TRUNCATE users, role_resources, resources, roles RESTART IDENTITY CASCADE"
+                "TRUNCATE sessions, users, role_resources, resources, roles RESTART IDENTITY CASCADE"
             )
             _seed_catalogs_postgres(conn)
             _seed_first_admin_postgres(conn)
@@ -425,9 +481,9 @@ def _fetch_column(column: str) -> Any:
                 ).fetchone()
         if row is None:
             raise RuntimeError("site_state missing")
-        return _remember(column, row[0])
+        return _remember(column, _normalize(column, row[0]))
     assert _memory is not None
-    return _remember(column, _memory[column])
+    return _remember(column, _normalize(column, _memory[column]))
 
 
 def _store_column(column: str, value: Any) -> Any:
@@ -527,6 +583,31 @@ def role_has_resource(role_id: int, key: str) -> bool:
     if resource_id is None:
         return False
     return (role_id, resource_id) in _memory["role_resources"]
+
+
+def role_resources(role_id: int) -> list[str]:
+    ensure_site_state()
+    if _postgres:
+        with _pg() as conn:
+            rows = conn.execute(
+                """
+                SELECT res.key
+                FROM role_resources rr
+                JOIN resources res ON res.id = rr.resource_id
+                WHERE rr.role_id = %s
+                """,
+                (role_id,),
+            ).fetchall()
+        granted = {row[0] for row in rows}
+    else:
+        assert _memory is not None
+        keys = {item["id"]: item["key"] for item in _memory["resources"].values()}
+        granted = {
+            keys[resource_id]
+            for owner, resource_id in _memory["role_resources"]
+            if owner == role_id and resource_id in keys
+        }
+    return [key for key in RESOURCE_KEYS if key in granted]
 
 
 def role_id_by_name(name: str) -> int | None:
@@ -645,3 +726,104 @@ def set_user_status(login: str, status: bool) -> None:
     user = _memory["users"].get(login)
     if user is not None:
         user["status"] = status
+
+
+def set_password_hash(user_id: int, password_hash: str) -> None:
+    ensure_site_state()
+    if _postgres:
+        with _pg() as conn:
+            conn.execute(
+                "UPDATE users SET password_hash = %s WHERE id = %s",
+                (password_hash, user_id),
+            )
+        return
+    assert _memory is not None
+    for user in _memory["users"].values():
+        if user["id"] == user_id:
+            user["password_hash"] = password_hash
+
+
+def _utc(epoch: float) -> datetime:
+    return datetime.fromtimestamp(epoch, tz=timezone.utc)
+
+
+def create_session(id_hash: str, user_id: int, password_tag: str, created: float, expires: float) -> None:
+    ensure_site_state()
+    if _postgres:
+        with _pg() as conn:
+            conn.execute(
+                """
+                INSERT INTO sessions (id_hash, user_id, password_tag, created_at, expires_at)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (id_hash, user_id, password_tag, _utc(created), _utc(expires)),
+            )
+        return
+    assert _memory is not None
+    _memory["sessions"][id_hash] = {
+        "user_id": user_id,
+        "password_tag": password_tag,
+        "created_at": created,
+        "expires_at": expires,
+    }
+
+
+def get_session(id_hash: str) -> dict[str, Any] | None:
+    """Session row joined with its user, or None. expires_at is a Unix time."""
+    ensure_site_state()
+    if _postgres:
+        with _pg() as conn:
+            row = conn.execute(
+                """
+                SELECT s.password_tag, s.expires_at,
+                       u.id, u.login, u.password_hash, u.status, u.role_id
+                FROM sessions s
+                JOIN users u ON u.id = s.user_id
+                WHERE s.id_hash = %s
+                """,
+                (id_hash,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "password_tag": row[0],
+            "expires_at": row[1].timestamp(),
+            "user": _user_from_row(row[2:]),
+        }
+    assert _memory is not None
+    stored = _memory["sessions"].get(id_hash)
+    if stored is None:
+        return None
+    user = next(
+        (item for item in _memory["users"].values() if item["id"] == stored["user_id"]),
+        None,
+    )
+    if user is None:
+        return None
+    return {
+        "password_tag": stored["password_tag"],
+        "expires_at": stored["expires_at"],
+        "user": copy.deepcopy(user),
+    }
+
+
+def delete_session(id_hash: str) -> None:
+    ensure_site_state()
+    if _postgres:
+        with _pg() as conn:
+            conn.execute("DELETE FROM sessions WHERE id_hash = %s", (id_hash,))
+        return
+    assert _memory is not None
+    _memory["sessions"].pop(id_hash, None)
+
+
+def purge_sessions(now: float) -> None:
+    ensure_site_state()
+    if _postgres:
+        with _pg() as conn:
+            conn.execute("DELETE FROM sessions WHERE expires_at <= %s", (_utc(now),))
+        return
+    assert _memory is not None
+    expired = [key for key, row in _memory["sessions"].items() if row["expires_at"] <= now]
+    for key in expired:
+        _memory["sessions"].pop(key, None)
