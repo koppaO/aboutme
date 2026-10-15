@@ -33,7 +33,6 @@ let meData = null;
 let projectsData = null;
 let projectItems = [];
 let selectedProject = 0;
-let stackLabels = [];
 let physicsToken = 0;
 let physicsState = null;
 let physicsVisible = false;
@@ -173,22 +172,6 @@ function finishBoot() {
 }
 
 // --- О себе, плеер, таймлайн --------------------------------------------------
-
-function uniqueStack(projects) {
-  const seen = new Set();
-  const labels = [];
-  for (const project of projects) {
-    for (const part of project.stack || []) {
-      const key = String(part).toLowerCase();
-      if (!part || seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      labels.push(String(part));
-    }
-  }
-  return labels;
-}
 
 function linkAnchor(link) {
   const anchor = el("a", null, link.name);
@@ -454,6 +437,7 @@ function selectProject(index) {
     const preview = document.getElementById("project-preview");
     preview.replaceChildren();
     fillProject(preview, project);
+    trailInvalidate();
   }
 }
 
@@ -601,13 +585,102 @@ function renderProjects(payload) {
 
 // --- Скиллы: капсулы на Matter.js -------------------------------------------
 
-const CAPSULE_FONT = '600 15px "Mona Sans", "Segoe UI", system-ui, sans-serif';
+const CAPSULE_FONT = '600 15px "Mona Sans", "Onest", "Segoe UI", system-ui, sans-serif';
+const SKILL_KINDS = ["language", "framework", "database", "infra", "tool"];
+const SKILL_LIMIT = 40;
+const RECOLOR_MS = 260;
 
-function capsuleColors() {
-  return {
-    fill: cssVar("--signal") || "#000000",
-    text: cssVar("--bg") || "#ffffff",
+// Цвета категорий взяты из палитры шлейфа. Текст на капсуле — чёрный или белый,
+// что контрастнее; у всех пяти цветов это не меньше 4.5:1.
+const SKILL_COLORS = {
+  language: "#583af7",
+  framework: "#f73678",
+  database: "#19c3e6",
+  infra: "#f5c400",
+  tool: "#5fed83",
+};
+
+// Старый api не знает категорий: угадываем по имени, остальное считаем инструментом.
+const KIND_GUESS = new Map(
+  Object.entries({
+    language: [
+      "python", "javascript", "js", "typescript", "ts", "go", "golang", "rust", "c", "c++", "cpp",
+      "c#", "java", "kotlin", "swift", "ruby", "php", "bash", "shell", "sql", "lua", "dart",
+      "scala", "haskell", "elixir", "html", "css",
+    ],
+    framework: [
+      "fastapi", "django", "flask", "react", "vue", "svelte", "angular", "next.js", "nextjs",
+      "nuxt", "express", "node.js", "nodejs", "spring", "pydantic", "sqlalchemy", "celery",
+      "aiogram", "tailwind", "matter.js",
+    ],
+    database: [
+      "postgres", "postgresql", "mysql", "mariadb", "sqlite", "redis", "mongodb", "mongo",
+      "clickhouse", "elasticsearch",
+    ],
+    infra: [
+      "docker", "docker compose", "nginx", "linux", "kubernetes", "k8s", "github actions", "ci",
+      "aws", "terraform", "ansible", "caddy", "traefik", "systemd", "wireguard", "vps",
+    ],
+  }).flatMap(([kind, names]) => names.map((name) => [name, kind])),
+);
+
+let skillItems = [];
+let skillFilter = null;
+
+function guessKind(name) {
+  return KIND_GUESS.get(name.toLowerCase()) || "tool";
+}
+
+function collectSkills(me, projects) {
+  const seen = new Set();
+  const items = [];
+  const add = (raw, kind) => {
+    const name = typeof raw === "string" ? raw.trim() : "";
+    const key = name.toLowerCase();
+    if (!name || seen.has(key) || items.length >= SKILL_LIMIT) {
+      return;
+    }
+    seen.add(key);
+    items.push({ name, kind: SKILL_KINDS.includes(kind) ? kind : guessKind(name), order: items.length });
   };
+  if (Array.isArray(me?.skills)) {
+    for (const skill of me.skills) {
+      if (skill && typeof skill === "object") {
+        add(skill.name, skill.kind);
+      }
+    }
+  }
+  if (!items.length) {
+    for (const project of projects) {
+      for (const part of project.stack || []) {
+        add(String(part), null);
+      }
+    }
+  }
+  // Капсулы падают группами: языки, фреймворки, базы, инфраструктура, инструменты.
+  return items.sort(
+    (a, b) => SKILL_KINDS.indexOf(a.kind) - SKILL_KINDS.indexOf(b.kind) || a.order - b.order,
+  );
+}
+
+function inkFor(fill) {
+  const rgb = parseHex(fill) || [0, 0, 0];
+  return contrast(rgb, [0, 0, 0]) >= contrast(rgb, [255, 255, 255]) ? "#000000" : "#ffffff";
+}
+
+function skillPaint(kind) {
+  if (skillFilter && skillFilter !== kind) {
+    return { fill: cssVar("--dim-fill") || "#e6e6e6", text: cssVar("--dim-ink") || "#4d4d4d" };
+  }
+  const fill = SKILL_COLORS[kind] || SKILL_COLORS.tool;
+  return { fill, text: inkFor(fill) };
+}
+
+function mixHex(from, to, k) {
+  const a = parseHex(from) || [0, 0, 0];
+  const b = parseHex(to) || [0, 0, 0];
+  const channel = (i) => Math.round(a[i] + (b[i] - a[i]) * k);
+  return `rgb(${channel(0)}, ${channel(1)}, ${channel(2)})`;
 }
 
 function loadMatter() {
@@ -654,7 +727,7 @@ function stopPhysics() {
   world.replaceChildren();
 }
 
-function mountPhysics(Matter, labels) {
+function mountPhysics(Matter, items) {
   const worldEl = document.getElementById("skills-world");
   const section = document.getElementById("skills-section");
   worldEl.hidden = false;
@@ -675,7 +748,6 @@ function mountPhysics(Matter, labels) {
       pixelRatio: ratio,
     },
   });
-  const colors = capsuleColors();
   const measure = render.context;
   measure.font = CAPSULE_FONT;
 
@@ -693,22 +765,31 @@ function mountPhysics(Matter, labels) {
       render: { visible: false },
     }),
   ];
-  const bodies = labels.slice(0, 24).map((label, index) => {
-    const capsuleWidth = Math.max(72, Math.ceil(measure.measureText(label).width) + 40);
-    const capsuleHeight = 38;
+  const capsuleHeight = 38;
+  let dropY = -capsuleHeight;
+  let lastKind = null;
+  const bodies = items.map((item) => {
+    const capsuleWidth = Math.max(72, Math.ceil(measure.measureText(item.name).width) + 40);
     const span = Math.max(width - capsuleWidth - 24, 1);
     const x = capsuleWidth / 2 + 12 + Math.random() * span;
-    // Капсулы стартуют над видимой областью и падают по очереди.
-    const y = -capsuleHeight - index * 46;
-    const body = Matter.Bodies.rectangle(x, y, capsuleWidth, capsuleHeight, {
+    // Капсулы стартуют над видимой областью; между категориями пауза побольше,
+    // чтобы группы падали отдельно.
+    dropY -= lastKind && lastKind !== item.kind ? 140 : 46;
+    lastKind = item.kind;
+    const paint = skillPaint(item.kind);
+    const body = Matter.Bodies.rectangle(x, dropY, capsuleWidth, capsuleHeight, {
       chamfer: { radius: capsuleHeight / 2 },
-      restitution: 0.45,
+      restitution: 0.4,
       friction: 0.12,
       frictionAir: 0.02,
-      label,
-      render: { fillStyle: colors.fill, strokeStyle: colors.fill, lineWidth: 0 },
+      // Бесконечная инерция: капсула не вращается, надпись всегда горизонтальная.
+      inertia: Infinity,
+      label: item.name,
+      render: { fillStyle: paint.fill, strokeStyle: paint.fill, lineWidth: 0 },
     });
-    Matter.Body.setAngle(body, (Math.random() - 0.5) * 0.6);
+    Matter.Body.setInertia(body, Infinity);
+    Matter.Body.setAngle(body, 0);
+    body.plugin.skill = { kind: item.kind, from: paint, to: paint, started: 0, text: paint.text };
     return body;
   });
   Matter.Composite.add(engine.world, [...walls, ...bodies]);
@@ -728,7 +809,16 @@ function mountPhysics(Matter, labels) {
   Matter.Composite.add(engine.world, mouseConstraint);
   render.mouse = mouse;
 
-  const state = { engine, render, runner: null, bodies, width, colors };
+  // Плавная перекраска при фильтре и смене темы: цвет тянется от старого к новому.
+  Matter.Events.on(render, "beforeRender", () => {
+    const now = performance.now();
+    for (const body of bodies) {
+      const paint = body.plugin.skill;
+      const k = paint.started ? Math.min(1, (now - paint.started) / RECOLOR_MS) : 1;
+      body.render.fillStyle = k < 1 ? mixHex(paint.from.fill, paint.to.fill, k) : paint.to.fill;
+      paint.text = k < 0.5 ? paint.from.text : paint.to.text;
+    }
+  });
 
   Matter.Events.on(render, "afterRender", () => {
     const context = render.context;
@@ -737,31 +827,33 @@ function mountPhysics(Matter, labels) {
     context.font = CAPSULE_FONT;
     context.textAlign = "center";
     context.textBaseline = "middle";
-    context.fillStyle = state.colors.text;
     for (const body of bodies) {
-      context.save();
-      context.translate(body.position.x, body.position.y);
-      context.rotate(body.angle);
-      context.fillText(body.label, 0, 1);
-      context.restore();
+      context.fillStyle = body.plugin.skill.text;
+      context.fillText(body.label, body.position.x, body.position.y + 1);
     }
     context.restore();
   });
 
-  state.runner = Matter.Runner.create();
-  Matter.Runner.run(state.runner, engine);
+  const runner = Matter.Runner.create();
+  Matter.Runner.run(runner, engine);
   Matter.Render.run(render);
-  return state;
+  return { engine, render, runner, bodies, width };
 }
 
 function recolorPhysics() {
   if (!physicsState) {
     return;
   }
-  physicsState.colors = capsuleColors();
+  const now = performance.now();
   for (const body of physicsState.bodies) {
-    body.render.fillStyle = physicsState.colors.fill;
-    body.render.strokeStyle = physicsState.colors.fill;
+    const paint = body.plugin.skill;
+    const next = skillPaint(paint.kind);
+    if (next.fill === paint.to.fill && next.text === paint.to.text) {
+      continue;
+    }
+    paint.from = paint.to;
+    paint.to = next;
+    paint.started = now;
   }
 }
 
@@ -775,23 +867,69 @@ function shakeSkills() {
       x: (Math.random() - 0.5) * 14,
       y: -8 - Math.random() * 10,
     });
-    Matter.Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.3);
   }
   return true;
+}
+
+function paintChip(node, kind) {
+  const fill = SKILL_COLORS[kind] || SKILL_COLORS.tool;
+  node.style.setProperty("--chip", fill);
+  node.style.setProperty("--chip-ink", inkFor(fill));
+}
+
+function applySkillFilter() {
+  for (const button of document.querySelectorAll("#skill-filter button")) {
+    button.setAttribute("aria-pressed", button.dataset.kind === skillFilter ? "true" : "false");
+  }
+  const chips = document.getElementById("skills-static");
+  chips.classList.toggle("is-filtered", Boolean(skillFilter));
+  for (const chip of chips.children) {
+    chip.classList.toggle("is-match", chip.dataset.kind === skillFilter);
+  }
+  recolorPhysics();
+}
+
+function renderSkillFilter() {
+  const box = document.getElementById("skill-filter");
+  box.replaceChildren();
+  const kinds = SKILL_KINDS.filter((kind) => skillItems.some((item) => item.kind === kind));
+  if (!kinds.includes(skillFilter)) {
+    skillFilter = null;
+  }
+  for (const kind of kinds) {
+    const button = el("button", "kind-btn");
+    button.type = "button";
+    button.dataset.kind = kind;
+    const dot = el("span", "kind-dot");
+    dot.setAttribute("aria-hidden", "true");
+    paintChip(dot, kind);
+    button.append(dot, el("span", null, t(`kind.${kind}`)));
+    button.addEventListener("click", () => {
+      skillFilter = skillFilter === kind ? null : kind;
+      applySkillFilter();
+    });
+    box.append(button);
+  }
+  box.hidden = kinds.length < 2;
 }
 
 function renderSkillChips() {
   const box = document.getElementById("skills-static");
   box.replaceChildren();
-  for (const label of stackLabels) {
-    box.append(el("li", "chip", label));
+  for (const item of skillItems) {
+    const chip = el("li", "chip", item.name);
+    chip.dataset.kind = item.kind;
+    paintChip(chip, item.kind);
+    box.append(chip);
   }
+  renderSkillFilter();
+  applySkillFilter();
 }
 
 async function syncSkills() {
   const token = ++physicsToken;
   const section = document.getElementById("skills-section");
-  if (!stackLabels.length) {
+  if (!skillItems.length) {
     stopPhysics();
     section.hidden = true;
     return;
@@ -820,7 +958,8 @@ async function syncSkills() {
       return;
     }
     stopPhysics();
-    physicsState = mountPhysics(Matter, stackLabels);
+    physicsState = mountPhysics(Matter, skillItems);
+    trailInvalidate();
   } catch (err) {
     console.error(err);
     stopPhysics();
@@ -860,195 +999,210 @@ function watchSkills() {
   });
 }
 
-// --- Радужный след: строки, которые «расшифровываются» под курсором -------------
+// --- Радужный шлейф: цветные клетки под курсором --------------------------------
 
 const GLYPH_CHARSET = "01{}[]<>/\\|=+-*#$%&?!~^:;ABCDEFabcdef";
-const TRAIL_FONT = '600 14px "Monaspace Neon", ui-monospace, Consolas, monospace';
-const TRAIL_CURSOR = "■";
-// Над этими местами строки не появляются: там капсулы, терминал, поля ввода и сама шапка.
-const TRAIL_BLOCKED = ".skills-world, .terminal, .masthead, .fx, input, textarea, select, button, .chip, .disc";
+const TRAIL_CELL = 20;
+// Клетка гаснет по своему таймеру, а не потому что кончился пул: пул растёт по мере
+// надобности, потолок нужен только на случай очень резкого движения.
+const TRAIL_POOL_MAX = 64;
+const TRAIL_LIFE = 420;
+const TRAIL_GAP = 40;
+const TRAIL_CHARS = "->+=<*&/#%";
+const TRAIL_PALETTE = ["#f73678", "#ff7a1a", "#f5c400", "#5fed83", "#19c3e6", "#583af7", "#ae85ff"];
+// Клетки ложатся только внутрь этих блоков, сетка выровнена по их краям.
+const TRAIL_ZONES = [
+  "#hero",
+  ".row:not([hidden]) > .row-title",
+  ".row:not([hidden]) > .row-body:not(.split):not(.work)",
+  ".row:not([hidden]) > .row-body.split > :not(#player)",
+  ".row:not([hidden]) > .work > *",
+].join(", ");
+// Вокруг текста и всего, с чем можно взаимодействовать, держим отступ в две клетки.
+const TRAIL_AVOID = "a, button, input, textarea, select, img, .chip, .kind-btn";
+// Эти места закрыты целиком: пластинка с кнопкой, капсулы, лента проектов.
+const TRAIL_CLOSED = "#player, .skills-world, .strip";
 
 function randomGlyph() {
   return GLYPH_CHARSET[Math.floor(Math.random() * GLYPH_CHARSET.length)];
 }
 
-// Курсор над буквой? Строки рисуются под текстом, но поверх букв они мешают читать,
-// поэтому там, где лежит текст, строка не начинается и обрывается.
-function textAt(x, y) {
-  let node = null;
-  let offset = 0;
-  if (document.caretPositionFromPoint) {
-    const position = document.caretPositionFromPoint(x, y);
-    node = position?.offsetNode;
-    offset = position?.offset ?? 0;
-  } else if (document.caretRangeFromPoint) {
-    const range = document.caretRangeFromPoint(x, y);
-    node = range?.startContainer;
-    offset = range?.startOffset ?? 0;
-  }
-  if (!node || node.nodeType !== Node.TEXT_NODE || !node.data.trim()) {
-    return false;
-  }
-  const range = document.createRange();
-  for (const index of [offset - 1, offset]) {
-    if (index < 0 || index >= node.length) {
-      continue;
-    }
-    range.setStart(node, index);
-    range.setEnd(node, index + 1);
-    for (const rect of range.getClientRects()) {
-      if (x >= rect.left - 6 && x <= rect.right + 6 && y >= rect.top - 3 && y <= rect.bottom + 3) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-function trailBlocked(x, y) {
-  if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) {
-    return true;
-  }
-  const target = document.elementFromPoint(x, y);
-  if (!target || target.closest(TRAIL_BLOCKED)) {
-    return true;
-  }
-  return textAt(x, y);
-}
+let trailInvalidate = () => {};
 
 function setupTrail() {
   const fine = window.matchMedia("(pointer: fine)");
-  const canvas = el("canvas", "trail");
-  canvas.setAttribute("aria-hidden", "true");
-  const context = canvas.getContext("2d");
-  if (!context) {
-    return;
-  }
-  document.body.prepend(canvas);
+  const main = document.getElementById("main");
+  const header = document.querySelector(".masthead");
+  const terminal = document.getElementById("terminal");
+  const layer = el("div", "trail");
+  layer.setAttribute("aria-hidden", "true");
+  const pool = [];
+  document.body.append(layer);
 
-  const ROW = 22;
-  const MAX_STRINGS = 3;
-  const STAGGER = 26;
-  const SCRAMBLE = 200;
-  const HOLD = 140;
-  const FADE = 260;
-  const strings = [];
-  let column = 9;
-  let ratio = 1;
-  let frame = 0;
-  let lastCell = "";
+  let layout = null;
+  let lastKey = "";
+  let color = 0;
 
-  function resize() {
-    ratio = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.round(window.innerWidth * ratio);
-    canvas.height = Math.round(window.innerHeight * ratio);
-    context.font = TRAIL_FONT;
-    column = Math.ceil(context.measureText("0").width) || 9;
-  }
-
-  function life(item) {
-    return (item.length + 1) * STAGGER + SCRAMBLE + HOLD + FADE;
+  function acquire() {
+    const idle = pool.find((slot) => !slot.busy);
+    if (idle) {
+      return idle;
+    }
+    if (pool.length < TRAIL_POOL_MAX) {
+      const cell = el("div", "trail-cell");
+      const tile = el("span", "trail-tile");
+      cell.append(tile);
+      layer.append(cell);
+      const slot = { cell, tile, timer: 0, busy: false, born: 0 };
+      pool.push(slot);
+      return slot;
+    }
+    return pool.reduce((oldest, slot) => (slot.born < oldest.born ? slot : oldest));
   }
 
-  function draw() {
-    frame = 0;
-    const now = performance.now();
-    context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    context.clearRect(0, 0, window.innerWidth, window.innerHeight);
-    context.font = TRAIL_FONT;
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    for (let index = strings.length - 1; index >= 0; index -= 1) {
-      const item = strings[index];
-      const age = now - item.born;
-      const total = life(item);
-      if (age >= total) {
-        strings.splice(index, 1);
+  // Всё считается в координатах документа, поэтому прокрутка кэш не портит.
+  // Пересчёт нужен, только когда меняется сама раскладка.
+  function measure() {
+    const sx = window.scrollX;
+    const sy = window.scrollY;
+    const box = (rect, pad) => ({
+      left: rect.left + sx - pad,
+      top: rect.top + sy - pad,
+      right: rect.right + sx + pad,
+      bottom: rect.bottom + sy + pad,
+    });
+    const zones = [];
+    for (const node of document.querySelectorAll(TRAIL_ZONES)) {
+      const rect = node.getBoundingClientRect();
+      if (rect.width >= TRAIL_CELL + 2 && rect.height >= TRAIL_CELL + 2) {
+        // Минус пиксель с каждой стороны: клетка не должна лечь на линию сетки.
+        zones.push(box(rect, -1));
+      }
+    }
+    const avoid = [];
+    const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.data.trim()) {
         continue;
       }
-      const fadeFrom = total - FADE;
-      const alpha = age < fadeFrom ? 1 : 1 - (age - fadeFrom) / FADE;
-      const y = item.y - window.scrollY + ROW / 2;
-      for (let i = 0; i <= item.length; i += 1) {
-        const shown = age - i * STAGGER;
-        if (shown < 0) {
-          break;
-        }
-        let char = TRAIL_CURSOR;
-        if (i < item.length) {
-          // Пока символ «расшифровывается», он перебирает случайные знаки, потом замирает.
-          char = shown < SCRAMBLE ? randomGlyph() : item.chars[i];
-        }
-        context.fillStyle = rainbow(item.hue + i * 16, alpha.toFixed(3));
-        context.fillText(char, item.x + i * column + column / 2, y);
+      range.selectNodeContents(node);
+      for (const rect of range.getClientRects()) {
+        avoid.push(box(rect, TRAIL_GAP));
       }
     }
-    if (strings.length) {
-      frame = window.requestAnimationFrame(draw);
+    for (const node of main.querySelectorAll(TRAIL_AVOID)) {
+      const rect = node.getBoundingClientRect();
+      if (rect.width || rect.height) {
+        avoid.push(box(rect, TRAIL_GAP));
+      }
     }
+    for (const node of main.querySelectorAll(TRAIL_CLOSED)) {
+      const rect = node.getBoundingClientRect();
+      if (rect.width || rect.height) {
+        avoid.push(box(rect, 0));
+      }
+    }
+    const sticky = getComputedStyle(header).position === "sticky";
+    const headerRect = header.getBoundingClientRect();
+    return { zones, avoid, sticky, headerBottom: sticky ? headerRect.height : headerRect.bottom + sy };
   }
 
-  function spawn(clientX, clientY) {
-    const pageX = clientX + window.scrollX;
-    const pageY = clientY + window.scrollY;
-    const col = Math.floor(pageX / column);
-    const row = Math.floor(pageY / ROW);
-    const cell = `${col}:${row}`;
-    if (cell === lastCell) {
-      return;
+  trailInvalidate = () => {
+    layout = null;
+    lastKey = "";
+  };
+
+  function hideAll() {
+    for (const slot of pool) {
+      window.clearTimeout(slot.timer);
+      slot.cell.classList.remove("is-on");
+      slot.busy = false;
     }
-    lastCell = cell;
-    const startX = col * column - window.scrollX;
-    const midY = row * ROW - window.scrollY + ROW / 2;
-    if (trailBlocked(startX + column / 2, midY)) {
-      return;
-    }
-    // Строка тянется вправо, пока не упрётся в текст, капсулы или край экрана.
-    const wanted = 5 + Math.floor(Math.random() * 3);
-    let length = 1;
-    while (length < wanted && !trailBlocked(startX + (length + 1) * column + column / 2, midY)) {
-      length += 1;
-    }
-    if (length < 3) {
-      return;
-    }
-    strings.push({
-      x: startX,
-      y: row * ROW,
-      length,
-      chars: Array.from({ length }, randomGlyph),
-      hue: (performance.now() / 6 + col * 7) % 360,
-      born: performance.now(),
-    });
-    while (strings.length > MAX_STRINGS) {
-      strings.shift();
-    }
-    if (!frame) {
-      frame = window.requestAnimationFrame(draw);
-    }
+    lastKey = "";
+  }
+
+  function free(left, top) {
+    const right = left + TRAIL_CELL;
+    const bottom = top + TRAIL_CELL;
+    return !layout.avoid.some(
+      (rect) => left < rect.right && right > rect.left && top < rect.bottom && bottom > rect.top,
+    );
+  }
+
+  function show(left, top) {
+    const slot = acquire();
+    slot.busy = true;
+    slot.born = performance.now();
+    window.clearTimeout(slot.timer);
+    slot.cell.classList.remove("is-on");
+    slot.cell.style.transform = `translate(${left - window.scrollX}px, ${top - window.scrollY}px)`;
+    const fill = TRAIL_PALETTE[color];
+    color = (color + 1) % TRAIL_PALETTE.length;
+    slot.tile.style.setProperty("--trail-fill", fill);
+    slot.tile.style.setProperty("--trail-ink", inkFor(fill));
+    slot.tile.textContent = TRAIL_CHARS[Math.floor(Math.random() * TRAIL_CHARS.length)];
+    // Класс ставится в следующем кадре, чтобы квадрат вырос из нуля, а не появился сразу.
+    window.requestAnimationFrame(() => slot.cell.classList.add("is-on"));
+    slot.timer = window.setTimeout(() => {
+      slot.cell.classList.remove("is-on");
+      // Клетка свободна, когда квадрат успел схлопнуться.
+      slot.timer = window.setTimeout(() => {
+        slot.busy = false;
+      }, 120);
+    }, TRAIL_LIFE);
   }
 
   function onMove(event) {
-    if (event.pointerType === "touch" || !fine.matches || calm()) {
+    if (event.pointerType === "touch" || !fine.matches || calm() || !terminal.hidden) {
       return;
     }
-    spawn(event.clientX, event.clientY);
-  }
-
-  // Строки привязаны к странице: при прокрутке их надо перерисовать на новом месте.
-  function onScroll() {
-    if (strings.length && !frame) {
-      frame = window.requestAnimationFrame(draw);
+    if (document.querySelector(".fx")) {
+      return;
     }
+    if (!layout) {
+      layout = measure();
+    }
+    const x = event.clientX + window.scrollX;
+    const y = event.clientY + window.scrollY;
+    if ((layout.sticky ? event.clientY : y) < layout.headerBottom + TRAIL_CELL) {
+      return;
+    }
+    const index = layout.zones.findIndex(
+      (zone) => x >= zone.left && x < zone.right && y >= zone.top && y < zone.bottom,
+    );
+    if (index < 0) {
+      lastKey = "";
+      return;
+    }
+    const zone = layout.zones[index];
+    const col = Math.floor((x - zone.left) / TRAIL_CELL);
+    const row = Math.floor((y - zone.top) / TRAIL_CELL);
+    const key = `${index}:${col}:${row}`;
+    if (key === lastKey) {
+      return;
+    }
+    lastKey = key;
+    const left = zone.left + col * TRAIL_CELL;
+    const top = zone.top + row * TRAIL_CELL;
+    if (left + TRAIL_CELL > zone.right || top + TRAIL_CELL > zone.bottom || !free(left, top)) {
+      return;
+    }
+    show(left, top);
   }
 
-  resize();
-  window.addEventListener("resize", resize);
   window.addEventListener("pointermove", onMove, { passive: true });
-  window.addEventListener("scroll", onScroll, { passive: true });
+  // Клетки висят в fixed-слое: при прокрутке они бы уехали от своей ячейки, поэтому гаснут.
+  window.addEventListener("scroll", hideAll, { passive: true });
+  window.addEventListener("resize", trailInvalidate);
+  window.addEventListener("aboutme:lang", trailInvalidate);
   document.addEventListener("pointerleave", () => {
-    lastCell = "";
+    lastKey = "";
   });
+  if ("ResizeObserver" in window) {
+    new ResizeObserver(trailInvalidate).observe(main);
+  }
+  document.fonts?.ready.then(trailInvalidate);
 }
 
 // --- Эффекты терминала: matrix и party ------------------------------------------
@@ -1580,6 +1734,11 @@ function rerender() {
   if (statusKey) {
     showStatus(statusKey);
   }
+  if (skillItems.length) {
+    renderSkillFilter();
+    applySkillFilter();
+  }
+  trailInvalidate();
 }
 
 window.addEventListener("aboutme:lang", rerender);
@@ -1605,8 +1764,9 @@ async function main() {
     projectsData = projects;
     renderMe(me);
     renderProjects(projects);
-    stackLabels = uniqueStack(projectItems);
+    skillItems = collectSkills(me, projectItems);
     syncSkills();
+    trailInvalidate();
     watchSkills();
   } catch (err) {
     showStatus("status.loadFail");
