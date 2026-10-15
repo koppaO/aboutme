@@ -568,6 +568,31 @@ def role_has_resource(role_id: int, key: str) -> bool:
     return (role_id, resource_id) in _memory["role_resources"]
 
 
+def role_resources(role_id: int) -> list[str]:
+    ensure_site_state()
+    if _postgres:
+        with _pg() as conn:
+            rows = conn.execute(
+                """
+                SELECT res.key
+                FROM role_resources rr
+                JOIN resources res ON res.id = rr.resource_id
+                WHERE rr.role_id = %s
+                """,
+                (role_id,),
+            ).fetchall()
+        granted = {row[0] for row in rows}
+    else:
+        assert _memory is not None
+        keys = {item["id"]: item["key"] for item in _memory["resources"].values()}
+        granted = {
+            keys[resource_id]
+            for owner, resource_id in _memory["role_resources"]
+            if owner == role_id and resource_id in keys
+        }
+    return [key for key in RESOURCE_KEYS if key in granted]
+
+
 def role_id_by_name(name: str) -> int | None:
     ensure_site_state()
     if _postgres:

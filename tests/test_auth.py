@@ -413,8 +413,29 @@ def test_session_ok_without_origin() -> None:
     assert _login().status_code == 200
     session = client.get("/session")
     assert session.status_code == 200
-    assert session.json() == {"ok": True, "login": LOGIN}
+    assert session.json() == {
+        "ok": True,
+        "login": LOGIN,
+        "resources": ["theme", "me", "projects", "users"],
+    }
     assert "password" not in session.text
+
+
+def test_session_lists_only_role_resources() -> None:
+    db.create_role("editor")
+    db.set_role_resources("editor", ["users", "me"])
+    db.create_user("editor", PASSWORD_HASH, "editor")
+    assert _login(login="editor").status_code == 200
+    body = client.get("/session").json()
+    assert body["login"] == "editor"
+    assert body["resources"] == ["me", "users"]
+
+
+def test_session_role_without_resources() -> None:
+    db.create_role("viewer")
+    db.create_user("viewer", PASSWORD_HASH, "viewer")
+    assert _login(login="viewer").status_code == 200
+    assert client.get("/session").json()["resources"] == []
 
 
 def test_inactive_session_gets_403() -> None:

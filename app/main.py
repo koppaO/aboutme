@@ -136,7 +136,8 @@ def logout(request: Request) -> JSONResponse:
 @app.get("/session")
 def session(request: Request) -> JSONResponse:
     user = auth.require_user(request)
-    return _json({"ok": True, "login": user["login"]})
+    resources = db.role_resources(int(user["role_id"]))
+    return _json({"ok": True, "login": user["login"], "resources": resources})
 
 
 @app.put("/theme")
