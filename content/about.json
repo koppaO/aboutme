@@ -55,5 +55,31 @@
       "kind": "project"
     }
   ],
+  "skills": [
+    {
+      "name": "Python",
+      "kind": "language"
+    },
+    {
+      "name": "JavaScript",
+      "kind": "language"
+    },
+    {
+      "name": "FastAPI",
+      "kind": "framework"
+    },
+    {
+      "name": "Postgres",
+      "kind": "database"
+    },
+    {
+      "name": "Docker",
+      "kind": "infra"
+    },
+    {
+      "name": "nginx",
+      "kind": "infra"
+    }
+  ],
   "now_playing": null
 }

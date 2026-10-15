@@ -285,6 +285,30 @@ def test_put_me_localized_and_timeline_roundtrip() -> None:
     assert client.get("/me").json() == body
 
 
+def test_put_me_skills_roundtrip() -> None:
+    assert _login().status_code == 200
+    skills = [{"name": "Python", "kind": "language"}, {"name": "nginx", "kind": "infra"}]
+    saved = _me_with(skills=skills)
+    assert saved.status_code == 200
+    assert saved.json()["skills"] == skills
+    assert client.get("/me").json()["skills"] == skills
+
+
+@pytest.mark.parametrize(
+    "skills",
+    [
+        [{"name": "Python", "kind": "language"}, {"name": "PYTHON", "kind": "language"}],
+        [{"name": "Python", "kind": "snake"}],
+        [{"name": f"s{i}", "kind": "tool"} for i in range(41)],
+    ],
+)
+def test_put_me_bad_skills_422(skills) -> None:
+    assert _login().status_code == 200
+    before = client.get("/me").json()
+    assert _me_with(skills=skills).status_code == 422
+    assert client.get("/me").json() == before
+
+
 def test_put_me_now_playing_null_ok() -> None:
     assert _login().status_code == 200
     saved = _me_with(now_playing=None)
