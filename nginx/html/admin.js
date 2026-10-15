@@ -21,6 +21,8 @@
     stack: 20,
     links: 10,
     timeline: 30,
+    skills: 40,
+    skill: 50,
     date: 20,
     track: 200,
     login: 32,
@@ -42,6 +44,13 @@
   var MODES = [
     ["light", "Светлая"],
     ["dark", "Тёмная"],
+  ];
+  var SKILL_KINDS = [
+    ["language", "Язык"],
+    ["framework", "Фреймворк"],
+    ["database", "База данных"],
+    ["infra", "Инфраструктура"],
+    ["tool", "Инструмент"],
   ];
   var KINDS = [
     ["study", "Учёба"],
@@ -68,6 +77,8 @@
     "invalid color": "Цвет записывается как #rgb или #rrggbb.",
     "invalid user": "Логин и роль — латиница, цифры, _ и -. Пароль от 8 символов. Роль должна существовать.",
     "invalid login": "Логин — латиница, цифры, _ и -, до 32 символов.",
+    "invalid skills": "Стек: у каждой технологии нужны название и категория, всего не больше 40.",
+    "duplicate skill": "Стек: технологии повторяются (регистр не важен).",
   };
 
   var checks = new WeakMap();
@@ -216,6 +227,28 @@
       }
     });
     return { node: el("label", { className: "check" }, [input, el("span", { text: label })]), input: input };
+  }
+
+  function select(label, obj, key, options) {
+    var input = el(
+      "select",
+      { value: obj[key] },
+      options.map(function (option) {
+        return el("option", { value: option[0], text: option[1] });
+      })
+    );
+    input.addEventListener("change", function () {
+      obj[key] = input.value;
+    });
+    return el("label", { className: "field" }, [el("span", { className: "field-label", text: label }), input]);
+  }
+
+  function knownKind(value, options, fallback) {
+    return options.some(function (option) {
+      return option[0] === value;
+    })
+      ? value
+      : fallback;
   }
 
   function button(text, opts) {
@@ -540,11 +573,13 @@
           present: event.end == null || event.end === "",
           title: loc(event.title),
           place: loc(event.place),
-          kind: KINDS.some(function (kind) {
-            return kind[0] === event.kind;
-          })
-            ? event.kind
-            : "study",
+          kind: knownKind(event.kind, KINDS, "study"),
+        };
+      }),
+      skills: (Array.isArray(source.skills) ? source.skills : []).map(function (item) {
+        return {
+          name: str(item && item.name),
+          kind: knownKind(item && item.kind, SKILL_KINDS, "tool"),
         };
       }),
       playing: {
@@ -618,16 +653,6 @@
           end.input.setCustomValidity("");
           end.input.removeAttribute("aria-invalid");
         });
-        var kind = el(
-          "select",
-          { value: item.kind },
-          KINDS.map(function (option) {
-            return el("option", { value: option[0], text: option[1] });
-          })
-        );
-        kind.addEventListener("change", function () {
-          item.kind = kind.value;
-        });
         return [
           el("div", { className: "pair is-dates" }, [
             field("Начало", item, "start", {
@@ -640,7 +665,43 @@
           ]),
           pair("Название", item.title, { max: LIMITS.title, required: true }),
           pair("Место", item.place, { max: LIMITS.title }),
-          el("label", { className: "field" }, [el("span", { className: "field-label", text: "Тип" }), kind]),
+          select("Тип", item, "kind", KINDS),
+        ];
+      },
+    });
+
+    // Повторы ищем без учёта регистра, как сервер.
+    function checkSkillName(value) {
+      var key = value.toLowerCase();
+      var count = model.skills.filter(function (skill) {
+        return skill.name.trim().toLowerCase() === key;
+      }).length;
+      return count > 1 ? "«" + value + "» уже есть в стеке." : "";
+    }
+
+    var skills = listEditor({
+      items: model.skills,
+      max: LIMITS.skills,
+      addLabel: "Добавить технологию",
+      itemLabel: function (index) {
+        return "Технология " + (index + 1);
+      },
+      create: function () {
+        return { name: "", kind: "tool" };
+      },
+      movable: true,
+      onChange: markDirty("me"),
+      renderItem: function (item) {
+        return [
+          el("div", { className: "pair is-skill" }, [
+            field("Название", item, "name", {
+              max: LIMITS.skill,
+              required: true,
+              spellcheck: false,
+              check: checkSkillName,
+            }).node,
+            select("Категория", item, "kind", SKILL_KINDS),
+          ]),
         ];
       },
     });
@@ -687,6 +748,14 @@
         ]),
         el("div", { className: "group" }, [el("h3", { text: "Ссылки" }), socials]),
         el("div", { className: "group" }, [el("h3", { text: "Таймлайн" }), timeline]),
+        el("div", { className: "group" }, [
+          el("h3", { text: "Стек" }),
+          el("p", {
+            className: "field-hint",
+            text: "Пустой список — главная соберёт стек из проектов. Порядок здесь — порядок на сайте.",
+          }),
+          skills,
+        ]),
         el("div", { className: "group" }, [el("h3", { text: "Сейчас играет" }), playerToggle.node, player]),
       ],
       collect: function () {
@@ -696,6 +765,9 @@
           about: trimLoc(model.about),
           socials: model.socials.map(function (item) {
             return { name: item.name.trim(), url: item.url.trim() };
+          }),
+          skills: model.skills.map(function (item) {
+            return { name: item.name.trim(), kind: item.kind };
           }),
           timeline: model.timeline.map(function (item) {
             return {
