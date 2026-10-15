@@ -33,7 +33,10 @@ curl http://localhost:8080/api/me
 curl http://localhost:8080/api/projects
 ```
 
-Текст о себе и список проектов лежат в `content/*.json`. В Compose папка смонтирована в api: правка JSON сразу видна в `/api/me` и `/api/projects` (обнови страницу в браузере).
+Текст о себе и список проектов лежат в `content/*.json`. Без Postgres api берёт их при каждом старте.
+С Postgres это только сид: файлы читаются один раз, когда строки `site_state` ещё нет, дальше api отдаёт то, что в базе.
+На живом сайте текст меняется через `PUT /api/me` и `PUT /api/projects` под сессией админа.
+Локально, чтобы подхватить правку JSON, проще пересоздать базу: `docker compose -f docker-compose.yml -f docker-compose.local.yml down -v` (удалит данные Postgres) и снова `up`.
 
 ## Формат API
 
