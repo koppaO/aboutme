@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Клипы</title>
     <link rel="stylesheet" href="/styles.css" />
+    <script src="/theme.js"></script>
   </head>
   <body>
     <div class="scene" aria-hidden="true">
@@ -22,16 +23,19 @@
       <div class="grain"></div>
     </div>
 
-    <main class="page">
-      <nav class="site-nav" aria-label="Разделы">
+    <header class="topbar">
+      <nav class="topbar-nav" aria-label="Разделы">
         <a href="/">О себе</a>
         <a href="/clips.html" aria-current="page">Клипы</a>
       </nav>
-      <header class="hero">
+    </header>
+
+    <main class="story">
+      <header class="hero is-short">
         <h1>Клипы</h1>
         <p id="headline">Пока здесь ничего нет.</p>
       </header>
-      <section>
+      <section class="panel">
         <h2>Скоро</h2>
         <p id="about">Заглушка. Список клипов появится позже.</p>
       </section>

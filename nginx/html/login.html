@@ -6,8 +6,9 @@
     <meta name="robots" content="noindex" />
     <title>Вход</title>
     <link rel="stylesheet" href="/styles.css" />
+    <script src="/theme.js"></script>
   </head>
-  <body class="is-loading">
+  <body>
     <div class="scene" aria-hidden="true">
       <div class="sky"></div>
       <div class="sun"></div>
@@ -23,15 +24,19 @@
       <div class="grain"></div>
     </div>
 
-    <main class="page">
-      <nav class="site-nav" aria-label="Разделы">
+    <header class="topbar">
+      <nav class="topbar-nav" aria-label="Разделы">
         <a href="/">О себе</a>
+        <a href="/clips.html">Клипы</a>
       </nav>
-      <header class="hero">
+    </header>
+
+    <main class="story">
+      <header class="hero is-short">
         <h1>Вход</h1>
         <p id="headline">Служебный вход. Публичного меню здесь нет.</p>
       </header>
-      <p id="status" hidden></p>
+      <p id="status" class="status" hidden></p>
       <form id="login-form" class="gate-form">
         <label>
           Логин

@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>aboutme</title>
     <link rel="stylesheet" href="/styles.css" />
+    <script src="/theme.js"></script>
   </head>
-  <body class="is-loading">
+  <body>
+    <div class="preloader" id="preloader" role="status" aria-live="polite">загрузка</div>
     <div class="scene" aria-hidden="true">
       <div class="sky"></div>
       <div class="sun"></div>
@@ -22,30 +24,66 @@
       <div class="grain"></div>
     </div>
 
-    <main class="page">
-      <p id="status" hidden></p>
-      <p id="health" class="health">проверяю сервисы…</p>
-      <nav class="site-nav" aria-label="Разделы">
+    <header class="topbar">
+      <nav class="topbar-nav" id="top-nav" aria-label="Разделы">
         <a href="/" aria-current="page">О себе</a>
         <a href="/clips.html">Клипы</a>
       </nav>
-      <header class="hero">
-        <h1 id="name"></h1>
+      <button
+        type="button"
+        id="menu-btn"
+        class="menu-btn"
+        aria-expanded="false"
+        aria-controls="terminal"
+        aria-haspopup="dialog"
+      >
+        Menu
+      </button>
+    </header>
+
+    <main class="story" id="story">
+      <canvas id="glyphs" class="glyphs" aria-hidden="true" hidden></canvas>
+      <section class="hero" id="hero">
+        <p id="status" class="status" hidden></p>
+        <h1 id="name" class="glitch" data-text=""></h1>
         <p id="headline"></p>
-        <nav id="socials"></nav>
-      </header>
-      <section id="about-section" hidden>
+      </section>
+
+      <section id="about-section" class="panel reveal" hidden>
         <h2>О себе</h2>
         <p id="about"></p>
+        <nav id="socials"></nav>
       </section>
-      <section id="projects-section" hidden>
+
+      <section id="skills-section" class="panel reveal" hidden>
+        <h2>Стек</h2>
+        <div id="skills-static" class="chips"></div>
+        <div id="skills-world" class="skills-world" hidden aria-hidden="true"></div>
+      </section>
+
+      <section id="projects-section" class="panel reveal" hidden>
         <h2>Проекты</h2>
-        <ul id="projects"></ul>
+        <div class="work">
+          <ul id="project-index" class="project-index"></ul>
+          <div id="project-preview" class="preview"></div>
+        </div>
+        <div id="project-strip" class="strip" tabindex="0" aria-label="Лента проектов"></div>
       </section>
+
       <footer>
         <p>Сайт с собственного API · nginx + FastAPI</p>
       </footer>
     </main>
+
+    <div id="terminal" class="terminal" role="dialog" aria-modal="true" aria-label="Терминал" hidden>
+      <p class="terminal-hint">Tab — дополнить · ↑↓ — история · Esc — закрыть</p>
+      <div id="terminal-log" class="terminal-log" role="log" aria-live="polite"></div>
+      <form id="terminal-form" class="terminal-form">
+        <label for="terminal-input">&gt;</label>
+        <input id="terminal-input" autocomplete="off" spellcheck="false" aria-label="Команда" maxlength="40" />
+      </form>
+    </div>
+
     <script src="/app.js"></script>
   </body>
 </html>
