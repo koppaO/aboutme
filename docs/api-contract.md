@@ -99,6 +99,16 @@
 
 Фронт со своей стороны принимает и строку, и `Localized`, чтобы работать со старым api до выкладки нового.
 
+## `GET /session`
+
+Только для вошедшего пользователя, без сессии — `401`.
+
+```json
+{ "ok": true, "login": "admin", "resources": ["theme", "me", "projects", "users"] }
+```
+
+`resources` — ключи, на которые у роли пользователя есть право записи, в порядке `theme`, `me`, `projects`, `users`. Админка показывает только эти разделы. Права всё равно проверяются на каждом `PUT`/`POST`.
+
 ## Без изменений
 
-`GET /health`, `POST /login`, `POST /logout`, `GET /session`, `PUT /me`, `PUT /projects`, `POST /users`: пути, права доступа и коды ответов прежние. `PUT /me` и `PUT /projects` проверяют тела по правилам выше.
+`GET /health`, `POST /login`, `POST /logout`, `PUT /me`, `PUT /projects`, `POST /users`: пути, права доступа и коды ответов прежние. `PUT /me` и `PUT /projects` проверяют тела по правилам выше.
