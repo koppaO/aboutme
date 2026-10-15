@@ -604,14 +604,17 @@
       renderItem: function (item) {
         var end = field("Конец", item, "end", {
           max: LIMITS.date,
-          placeholder: "2027",
           hint: "Год или год-месяц.",
         });
-        end.input.disabled = item.present;
-        end.input.required = !item.present;
-        var present = checkbox("По сей день", item, "present", function (on) {
+        // У отключённого поля подсказка «2027» читалась бы как дата конца.
+        function setPresent(on) {
           end.input.disabled = on;
           end.input.required = !on;
+          end.input.placeholder = on ? "" : "2027";
+        }
+        setPresent(item.present);
+        var present = checkbox("По сей день", item, "present", function (on) {
+          setPresent(on);
           end.input.setCustomValidity("");
           end.input.removeAttribute("aria-invalid");
         });
