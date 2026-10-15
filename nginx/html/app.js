@@ -161,19 +161,6 @@ function rainbow(hue, alpha = 1) {
 
 // --- Загрузка ------------------------------------------------------------------
 
-function glitchName() {
-  const heading = document.getElementById("name");
-  if (calm() || !heading) {
-    return;
-  }
-  heading.classList.remove("is-glitching");
-  // Перезапуск анимации: класс снимается и ставится в следующем кадре.
-  window.requestAnimationFrame(() => {
-    heading.classList.add("is-glitching");
-    window.setTimeout(() => heading.classList.remove("is-glitching"), 800);
-  });
-}
-
 function finishBoot() {
   const wait = calm() ? 0 : Math.max(0, 900 - (performance.now() - bootStarted));
   window.setTimeout(() => {
@@ -182,7 +169,6 @@ function finishBoot() {
     if (preloader) {
       window.setTimeout(() => preloader.remove(), calm() ? 0 : 450);
     }
-    window.setTimeout(glitchName, calm() ? 0 : 250);
   }, wait);
 }
 
@@ -220,7 +206,6 @@ function renderMe(me) {
   document.title = name || "koppaO";
   const heading = document.getElementById("name");
   heading.textContent = name;
-  heading.dataset.text = name;
   document.getElementById("headline").textContent = pick(me.headline);
 
   const aboutText = pick(me.about);
@@ -875,130 +860,194 @@ function watchSkills() {
   });
 }
 
-// --- Радужные символы под курсором в первом экране ----------------------------
+// --- Радужный след: строки, которые «расшифровываются» под курсором -------------
 
 const GLYPH_CHARSET = "01{}[]<>/\\|=+-*#$%&?!~^:;ABCDEFabcdef";
+const TRAIL_FONT = '600 14px "Monaspace Neon", ui-monospace, Consolas, monospace';
+const TRAIL_CURSOR = "■";
+// Над этими местами строки не появляются: там капсулы, терминал, поля ввода и сама шапка.
+const TRAIL_BLOCKED = ".skills-world, .terminal, .masthead, .fx, input, textarea, select, button, .chip, .disc";
 
 function randomGlyph() {
   return GLYPH_CHARSET[Math.floor(Math.random() * GLYPH_CHARSET.length)];
 }
 
-function setupGlyphField() {
-  const canvas = document.getElementById("glyphs");
-  if (!canvas || calm()) {
-    return;
+// Курсор над буквой? Строки рисуются под текстом, но поверх букв они мешают читать,
+// поэтому там, где лежит текст, строка не начинается и обрывается.
+function textAt(x, y) {
+  let node = null;
+  let offset = 0;
+  if (document.caretPositionFromPoint) {
+    const position = document.caretPositionFromPoint(x, y);
+    node = position?.offsetNode;
+    offset = position?.offset ?? 0;
+  } else if (document.caretRangeFromPoint) {
+    const range = document.caretRangeFromPoint(x, y);
+    node = range?.startContainer;
+    offset = range?.startOffset ?? 0;
   }
+  if (!node || node.nodeType !== Node.TEXT_NODE || !node.data.trim()) {
+    return false;
+  }
+  const range = document.createRange();
+  for (const index of [offset - 1, offset]) {
+    if (index < 0 || index >= node.length) {
+      continue;
+    }
+    range.setStart(node, index);
+    range.setEnd(node, index + 1);
+    for (const rect of range.getClientRects()) {
+      if (x >= rect.left - 6 && x <= rect.right + 6 && y >= rect.top - 3 && y <= rect.bottom + 3) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function trailBlocked(x, y) {
+  if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) {
+    return true;
+  }
+  const target = document.elementFromPoint(x, y);
+  if (!target || target.closest(TRAIL_BLOCKED)) {
+    return true;
+  }
+  return textAt(x, y);
+}
+
+function setupTrail() {
+  const fine = window.matchMedia("(pointer: fine)");
+  const canvas = el("canvas", "trail");
+  canvas.setAttribute("aria-hidden", "true");
   const context = canvas.getContext("2d");
   if (!context) {
     return;
   }
-  canvas.hidden = false;
+  document.body.prepend(canvas);
 
-  const CELL = 18;
-  const LIFE = 900;
-  const RADIUS = 1.7;
-  const cells = new Map();
-  let columns = 0;
-  let rows = 0;
+  const ROW = 22;
+  const MAX_STRINGS = 3;
+  const STAGGER = 26;
+  const SCRAMBLE = 200;
+  const HOLD = 140;
+  const FADE = 260;
+  const strings = [];
+  let column = 9;
   let ratio = 1;
-  let last = null;
   let frame = 0;
+  let lastCell = "";
 
   function resize() {
-    const rect = canvas.getBoundingClientRect();
     ratio = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.round(rect.width * ratio);
-    canvas.height = Math.round(rect.height * ratio);
-    columns = Math.ceil(rect.width / CELL);
-    rows = Math.ceil(rect.height / CELL);
-    cells.clear();
+    canvas.width = Math.round(window.innerWidth * ratio);
+    canvas.height = Math.round(window.innerHeight * ratio);
+    context.font = TRAIL_FONT;
+    column = Math.ceil(context.measureText("0").width) || 9;
   }
 
-  function light(x, y, now) {
-    const col = Math.floor(x / CELL);
-    const row = Math.floor(y / CELL);
-    const reach = Math.ceil(RADIUS);
-    for (let dy = -reach; dy <= reach; dy += 1) {
-      for (let dx = -reach; dx <= reach; dx += 1) {
-        const c = col + dx;
-        const r = row + dy;
-        if (c < 0 || r < 0 || c >= columns || r >= rows) {
-          continue;
-        }
-        const distance = Math.hypot(dx, dy);
-        if (distance > RADIUS || Math.random() > 0.75 - distance * 0.25) {
-          continue;
-        }
-        cells.set(r * columns + c, {
-          c,
-          r,
-          ch: randomGlyph(),
-          hue: (now / 8 + c * 9 + r * 4) % 360,
-          born: now - distance * 90,
-        });
-      }
-    }
+  function life(item) {
+    return (item.length + 1) * STAGGER + SCRAMBLE + HOLD + FADE;
   }
 
   function draw() {
     frame = 0;
     const now = performance.now();
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    context.clearRect(0, 0, canvas.width / ratio, canvas.height / ratio);
-    context.font = `700 ${Math.round(CELL * 0.8)}px "Monaspace Neon", ui-monospace, Consolas, monospace`;
+    context.clearRect(0, 0, window.innerWidth, window.innerHeight);
+    context.font = TRAIL_FONT;
     context.textAlign = "center";
     context.textBaseline = "middle";
-    for (const [key, cell] of cells) {
-      const age = now - cell.born;
-      if (age >= LIFE) {
-        cells.delete(key);
+    for (let index = strings.length - 1; index >= 0; index -= 1) {
+      const item = strings[index];
+      const age = now - item.born;
+      const total = life(item);
+      if (age >= total) {
+        strings.splice(index, 1);
         continue;
       }
-      if (Math.random() < 0.06) {
-        cell.ch = randomGlyph();
+      const fadeFrom = total - FADE;
+      const alpha = age < fadeFrom ? 1 : 1 - (age - fadeFrom) / FADE;
+      const y = item.y - window.scrollY + ROW / 2;
+      for (let i = 0; i <= item.length; i += 1) {
+        const shown = age - i * STAGGER;
+        if (shown < 0) {
+          break;
+        }
+        let char = TRAIL_CURSOR;
+        if (i < item.length) {
+          // Пока символ «расшифровывается», он перебирает случайные знаки, потом замирает.
+          char = shown < SCRAMBLE ? randomGlyph() : item.chars[i];
+        }
+        context.fillStyle = rainbow(item.hue + i * 16, alpha.toFixed(3));
+        context.fillText(char, item.x + i * column + column / 2, y);
       }
-      const alpha = 1 - (age / LIFE) ** 2;
-      context.fillStyle = rainbow(cell.hue, alpha.toFixed(3));
-      context.fillText(cell.ch, cell.c * CELL + CELL / 2, cell.r * CELL + CELL / 2);
     }
-    if (cells.size) {
+    if (strings.length) {
       frame = window.requestAnimationFrame(draw);
     }
   }
 
-  function onMove(event) {
-    const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
-      last = null;
+  function spawn(clientX, clientY) {
+    const pageX = clientX + window.scrollX;
+    const pageY = clientY + window.scrollY;
+    const col = Math.floor(pageX / column);
+    const row = Math.floor(pageY / ROW);
+    const cell = `${col}:${row}`;
+    if (cell === lastCell) {
       return;
     }
-    const now = performance.now();
-    // Быстрое движение даёт редкие события: заполняем путь между ними.
-    if (last) {
-      const steps = Math.min(24, Math.floor(Math.hypot(x - last.x, y - last.y) / (CELL / 2)));
-      for (let step = 1; step < steps; step += 1) {
-        const k = step / steps;
-        light(last.x + (x - last.x) * k, last.y + (y - last.y) * k, now);
-      }
+    lastCell = cell;
+    const startX = col * column - window.scrollX;
+    const midY = row * ROW - window.scrollY + ROW / 2;
+    if (trailBlocked(startX + column / 2, midY)) {
+      return;
     }
-    light(x, y, now);
-    last = { x, y };
+    // Строка тянется вправо, пока не упрётся в текст, капсулы или край экрана.
+    const wanted = 5 + Math.floor(Math.random() * 3);
+    let length = 1;
+    while (length < wanted && !trailBlocked(startX + (length + 1) * column + column / 2, midY)) {
+      length += 1;
+    }
+    if (length < 3) {
+      return;
+    }
+    strings.push({
+      x: startX,
+      y: row * ROW,
+      length,
+      chars: Array.from({ length }, randomGlyph),
+      hue: (performance.now() / 6 + col * 7) % 360,
+      born: performance.now(),
+    });
+    while (strings.length > MAX_STRINGS) {
+      strings.shift();
+    }
     if (!frame) {
       frame = window.requestAnimationFrame(draw);
     }
   }
 
-  resize();
-  if ("ResizeObserver" in window) {
-    new ResizeObserver(resize).observe(canvas);
-  } else {
-    window.addEventListener("resize", resize);
+  function onMove(event) {
+    if (event.pointerType === "touch" || !fine.matches || calm()) {
+      return;
+    }
+    spawn(event.clientX, event.clientY);
   }
+
+  // Строки привязаны к странице: при прокрутке их надо перерисовать на новом месте.
+  function onScroll() {
+    if (strings.length && !frame) {
+      frame = window.requestAnimationFrame(draw);
+    }
+  }
+
+  resize();
+  window.addEventListener("resize", resize);
   window.addEventListener("pointermove", onMove, { passive: true });
+  window.addEventListener("scroll", onScroll, { passive: true });
   document.addEventListener("pointerleave", () => {
-    last = null;
+    lastCell = "";
   });
 }
 
@@ -1119,7 +1168,6 @@ function startParty() {
   }
 
   window.requestAnimationFrame(tick);
-  glitchName();
   shakeSkills();
 }
 
@@ -1549,7 +1597,7 @@ motionQuery.addEventListener("change", () => {
 });
 
 async function main() {
-  setupGlyphField();
+  setupTrail();
   bindStrip(document.getElementById("project-strip"));
   try {
     const [me, projects] = await Promise.all([loadJson("/api/me"), loadJson("/api/projects")]);

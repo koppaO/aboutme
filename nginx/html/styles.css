@@ -30,7 +30,7 @@
 }
 
 /* Шесть цветов темы приходят и из /api/theme (theme.js кладёт их inline на <html>).
-   Остальное — производные: радуга для glitch и маркеров не настраивается. */
+   Радуга для следа и маркеров считается в app.js и не настраивается. */
 :root {
   --bg: #ffffff;
   --ink: #000000;
@@ -38,9 +38,6 @@
   --line: #000000;
   --panel: #f5f5f5;
   --signal: #000000;
-
-  --glitch-a: hsl(328 100% 44%);
-  --glitch-b: hsl(196 100% 34%);
 
   --sans: "Mona Sans", "Onest", "Segoe UI", system-ui, sans-serif;
   --mono: "Monaspace Neon", ui-monospace, "Cascadia Mono", Consolas, monospace;
@@ -58,9 +55,6 @@
   --line: #2a3566;
   --panel: #0a1028;
   --signal: #7cf0c8;
-
-  --glitch-a: hsl(328 100% 70%);
-  --glitch-b: hsl(176 100% 58%);
 
   color-scheme: dark;
 }
@@ -329,8 +323,10 @@ body.is-ready .preloader {
   padding-top: clamp(4rem, 14vh, 8rem);
 }
 
-.glyphs {
-  position: absolute;
+/* Один холст на всю страницу под содержимым: строки следа видны в пустых местах
+   и не перекрывают текст, кнопки и терминал. */
+.trail {
+  position: fixed;
   inset: 0;
   z-index: 0;
   width: 100%;
@@ -338,7 +334,8 @@ body.is-ready .preloader {
   pointer-events: none;
 }
 
-.hero > :not(.glyphs) {
+.page,
+.site-foot {
   position: relative;
   z-index: 1;
 }
@@ -373,98 +370,6 @@ h1 {
 
 .status::before {
   content: "! ";
-}
-
-.glitch {
-  position: relative;
-  display: inline-block;
-  max-width: 100%;
-}
-
-.glitch::before,
-.glitch::after {
-  content: attr(data-text);
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0;
-}
-
-.glitch::before {
-  color: var(--glitch-a);
-  clip-path: inset(0 0 58% 0);
-}
-
-.glitch::after {
-  color: var(--glitch-b);
-  clip-path: inset(42% 0 0 0);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .glitch:hover::before,
-  .glitch:hover::after {
-    opacity: 1;
-  }
-
-  .glitch:hover::before {
-    transform: translate(-4px, -2px);
-  }
-
-  .glitch:hover::after {
-    transform: translate(4px, 2px);
-  }
-
-  .glitch.is-glitching::before {
-    animation: glitch-a 0.7s steps(2, end) both;
-  }
-
-  .glitch.is-glitching::after {
-    animation: glitch-b 0.7s steps(2, end) both;
-  }
-}
-
-@keyframes glitch-a {
-  0% {
-    opacity: 1;
-    transform: translate(-10px, 0);
-    clip-path: inset(10% 0 70% 0);
-  }
-  30% {
-    opacity: 1;
-    transform: translate(6px, -3px);
-    clip-path: inset(0 0 52% 0);
-  }
-  60% {
-    opacity: 1;
-    transform: translate(-3px, 2px);
-    clip-path: inset(30% 0 40% 0);
-  }
-  100% {
-    opacity: 0;
-    transform: none;
-  }
-}
-
-@keyframes glitch-b {
-  0% {
-    opacity: 1;
-    transform: translate(10px, 0);
-    clip-path: inset(60% 0 10% 0);
-  }
-  30% {
-    opacity: 1;
-    transform: translate(-6px, 3px);
-    clip-path: inset(44% 0 0 0);
-  }
-  60% {
-    opacity: 1;
-    transform: translate(3px, -2px);
-    clip-path: inset(70% 0 5% 0);
-  }
-  100% {
-    opacity: 0;
-    transform: none;
-  }
 }
 
 /* --- Строки сетки: заголовок слева, содержимое справа ------------------------ */
@@ -556,14 +461,15 @@ h3 {
 }
 
 .vinyl {
-  display: grid;
-  grid-template-columns: 7.5rem minmax(0, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 1.1rem;
 }
 
 .disc {
   position: relative;
+  flex: none;
   width: 7.5rem;
   aspect-ratio: 1;
   border-radius: 50%;
@@ -618,7 +524,9 @@ h3 {
   }
 }
 
+/* В узкой колонке трек уходит под пластинку, а не вылезает за край. */
 .track {
+  flex: 1 1 9rem;
   min-width: 0;
 }
 
@@ -1182,10 +1090,6 @@ h3 {
   .tl-meta {
     grid-column: 2;
     grid-row: 3;
-  }
-
-  .vinyl {
-    grid-template-columns: 6rem minmax(0, 1fr);
   }
 
   .disc {
