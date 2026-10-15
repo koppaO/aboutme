@@ -602,6 +602,20 @@ def test_unknown_login_locks_the_same_way(monkeypatch) -> None:
     assert known[0].json() == unknown[0].json()
 
 
+def test_attempt_counted_before_password_check(monkeypatch) -> None:
+    # Пока идёт медленный PBKDF2, параллельный запрос уже должен видеть эту попытку.
+    monkeypatch.setenv("TRUST_PROXY", "1")
+    seen = []
+
+    def spy(login: str, password: str):
+        seen.append((auth._attempts.get("198.51.100.7", {}).get("count"), len(auth._login_attempts[auth.login_key(login)]["fails"])))
+        return None
+
+    monkeypatch.setattr(auth, "authenticate", spy)
+    assert _login_from("198.51.100.7", password="wrong").status_code == 401
+    assert seen == [(1, 1)]
+
+
 def test_success_resets_login_counter(monkeypatch) -> None:
     monkeypatch.setenv("TRUST_PROXY", "1")
     for i in range(auth.LOGIN_MAX_FAILURES - 1):

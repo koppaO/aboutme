@@ -117,7 +117,7 @@ async def login(request: Request) -> JSONResponse:
     await auth.login_name_allowed(login_name)
     user = await asyncio.to_thread(auth.authenticate, login_name, password)
     if user is None:
-        await auth.reject_login(ip, login_name)
+        await auth.reject_login(ip)
     token = await asyncio.to_thread(auth.make_session, user)
     if token is None:
         await auth.reject_login(ip)

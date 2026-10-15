@@ -403,21 +403,23 @@ def clear_session_cookie(response: Response, request: Request) -> None:
     )
 
 
+# Попытка засчитывается неудачной сразу после проверки блокировки, до медленного PBKDF2,
+# без await между ними. Иначе параллельные запросы все видят «не заблокирован» и обходят
+# лимит. Успешный вход потом обнуляет счётчики.
 async def login_allowed(ip: str) -> None:
     if is_locked(ip):
         raise HTTPException(status_code=429, detail="too many attempts")
+    register_failure(ip)
 
 
 async def login_name_allowed(login: str) -> None:
     # Один ответ для любого логина, есть он или нет. Пароль при блокировке не проверяем.
     if login_locked(login):
         raise HTTPException(status_code=429, detail="too many attempts")
+    register_login_failure(login)
 
 
-async def reject_login(ip: str, login: str | None = None) -> NoReturn:
-    register_failure(ip)
-    if login is not None:
-        register_login_failure(login)
+async def reject_login(ip: str) -> NoReturn:
     if FAIL_DELAY_SEC:
         await asyncio.sleep(FAIL_DELAY_SEC)
     raise HTTPException(status_code=401, detail="unauthorized")
