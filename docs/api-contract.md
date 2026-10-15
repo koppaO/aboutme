@@ -55,7 +55,7 @@
 | `timeline[].kind` | `"study"`, `"work"` или `"project"`. |
 | `now_playing` | Объект или `null`, если плеер не нужен. |
 | `now_playing.title`, `.artist` | Строки до 200 символов, `title` обязателен. |
-| `now_playing.src` | Обязателен. Либо свой путь `^/media/[A-Za-z0-9._-]+$` (без `..`, без вложенных папок), либо `https://` URL до 500 символов. |
+| `now_playing.src` | Обязателен. Только свой путь `^/media/[A-Za-z0-9._-]+$` (без `..`, без вложенных папок). Внешние URL не принимаются: CSP `default-src 'self'` их всё равно не загрузит. |
 | `now_playing.cover` | То же правило, что у `src`, или `null`. |
 
 ## `GET /projects`
