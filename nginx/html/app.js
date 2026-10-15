@@ -10,28 +10,46 @@ const ENABLED_COMMANDS = [
   "open",
   "clips",
   "status",
+  "theme",
+  "lang",
+  "matrix",
+  "party",
   "clear",
   "exit",
 ];
 
 const MATTER_SRC = "/vendor/matter-0.20.0.min.js";
+const MEDIA_PATH = /^\/media\/[A-Za-z0-9._-]+$/;
 
-const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const I18N = window.aboutmeI18n;
+const t = (key, vars) => I18N.t(key, vars);
+const pick = (value) => I18N.pick(value);
+
+const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 const wideQuery = window.matchMedia("(min-width: 900px)");
 const bootStarted = performance.now();
 
 let meData = null;
+let projectsData = null;
 let projectItems = [];
+let selectedProject = 0;
 let stackLabels = [];
 let physicsToken = 0;
 let physicsState = null;
 let physicsVisible = false;
 let matterPromise = null;
+let player = null;
+let statusKey = null;
 
-function showStatus(message) {
-  const el = document.getElementById("status");
-  el.hidden = false;
-  el.textContent = message;
+function calm() {
+  return motionQuery.matches;
+}
+
+function showStatus(key) {
+  statusKey = key;
+  const node = document.getElementById("status");
+  node.hidden = false;
+  node.textContent = t(key);
 }
 
 async function loadJson(path) {
@@ -62,17 +80,124 @@ function safeUrl(raw) {
   }
 }
 
+// Плеер берёт файлы только со своего /media/ или по https, как в контракте api.
+function mediaUrl(raw) {
+  if (typeof raw !== "string" || !raw || raw.length > 500) {
+    return null;
+  }
+  if (MEDIA_PATH.test(raw) && !raw.includes("..")) {
+    return raw;
+  }
+  if (!raw.startsWith("https://")) {
+    return null;
+  }
+  try {
+    const url = new URL(raw);
+    return url.protocol === "https:" && !url.username && !url.password ? url.href : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+// --- Радуга: насыщенные цвета с контрастом к текущему фону ---------------------
+
+function parseHex(value) {
+  const match = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(value || "");
+  if (!match) {
+    return null;
+  }
+  let hex = match[1];
+  if (hex.length === 3) {
+    hex = [...hex].map((char) => char + char).join("");
+  }
+  return [0, 2, 4].map((offset) => parseInt(hex.slice(offset, offset + 2), 16));
+}
+
+function hslToRgb(hue, saturation, lightness) {
+  const shift = (n) => (n + hue / 30) % 12;
+  const amount = saturation * Math.min(lightness, 1 - lightness);
+  const channel = (n) => lightness - amount * Math.max(-1, Math.min(shift(n) - 3, 9 - shift(n), 1));
+  return [channel(0), channel(8), channel(4)].map((value) => Math.round(value * 255));
+}
+
+function luminance(rgb) {
+  const linear = (value) => {
+    const v = value / 255;
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * linear(rgb[0]) + 0.7152 * linear(rgb[1]) + 0.0722 * linear(rgb[2]);
+}
+
+function contrast(a, b) {
+  const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (light + 0.05) / (dark + 0.05);
+}
+
+const rainbowCache = { key: "", table: [] };
+
+// Для каждого оттенка подбираем светлоту: на белом жёлтый и бирюзовый темнеют,
+// на тёмно-синем синий и фиолетовый светлеют. Так след одинаково читается на любом фоне.
+function rainbowTable() {
+  const bg = parseHex(cssVar("--bg")) || [255, 255, 255];
+  const key = bg.join(",");
+  if (rainbowCache.key === key) {
+    return rainbowCache.table;
+  }
+  const darkBg = luminance(bg) < 0.2;
+  const target = darkBg ? 4.5 : 3.6;
+  const table = [];
+  for (let hue = 0; hue < 360; hue += 1) {
+    let lightness = darkBg ? 0.58 : 0.5;
+    let rgb = hslToRgb(hue, 0.95, lightness);
+    while (contrast(rgb, bg) < target && lightness > 0.12 && lightness < 0.92) {
+      lightness += darkBg ? 0.02 : -0.02;
+      rgb = hslToRgb(hue, 0.95, lightness);
+    }
+    table.push(rgb);
+  }
+  rainbowCache.key = key;
+  rainbowCache.table = table;
+  return table;
+}
+
+function rainbow(hue, alpha = 1) {
+  const index = Math.round(((hue % 360) + 360) % 360) % 360;
+  const [r, g, b] = rainbowTable()[index];
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// --- Загрузка ------------------------------------------------------------------
+
+function glitchName() {
+  const heading = document.getElementById("name");
+  if (calm() || !heading) {
+    return;
+  }
+  heading.classList.remove("is-glitching");
+  // Перезапуск анимации: класс снимается и ставится в следующем кадре.
+  window.requestAnimationFrame(() => {
+    heading.classList.add("is-glitching");
+    window.setTimeout(() => heading.classList.remove("is-glitching"), 800);
+  });
+}
+
 function finishBoot() {
-  const wait = reduceMotion ? 0 : Math.max(0, 1000 - (performance.now() - bootStarted));
+  const wait = calm() ? 0 : Math.max(0, 900 - (performance.now() - bootStarted));
   window.setTimeout(() => {
     document.body.classList.add("is-ready");
     const preloader = document.getElementById("preloader");
-    if (!preloader) {
-      return;
+    if (preloader) {
+      window.setTimeout(() => preloader.remove(), calm() ? 0 : 450);
     }
-    window.setTimeout(() => preloader.remove(), reduceMotion ? 0 : 500);
+    window.setTimeout(glitchName, calm() ? 0 : 250);
   }, wait);
 }
+
+// --- О себе, плеер, таймлайн --------------------------------------------------
 
 function uniqueStack(projects) {
   const seen = new Set();
@@ -84,7 +209,7 @@ function uniqueStack(projects) {
         continue;
       }
       seen.add(key);
-      labels.push(part);
+      labels.push(String(part));
     }
   }
   return labels;
@@ -102,37 +227,225 @@ function linkAnchor(link) {
 }
 
 function renderMe(me) {
-  const name = me.name || "";
-  document.title = name || "aboutme";
+  const name = typeof me.name === "string" ? me.name : "";
+  document.title = name || "koppaO";
   const heading = document.getElementById("name");
   heading.textContent = name;
   heading.dataset.text = name;
-  document.getElementById("headline").textContent = me.headline || "";
+  document.getElementById("headline").textContent = pick(me.headline);
 
-  const about = document.getElementById("about");
-  const aboutSection = document.getElementById("about-section");
-  if (me.about) {
-    about.textContent = me.about;
-    aboutSection.hidden = false;
-  }
+  const aboutText = pick(me.about);
+  document.getElementById("about").textContent = aboutText;
 
   const socials = document.getElementById("socials");
   socials.replaceChildren();
   for (const item of me.socials || []) {
+    const entry = el("li");
     const link = linkAnchor(item);
     link.rel = "me noopener noreferrer";
-    socials.append(link);
+    entry.append(link);
+    socials.append(entry);
+  }
+  document.getElementById("about-text").hidden = !aboutText && !socials.childElementCount;
+
+  const hasPlayer = renderPlayer(me.now_playing);
+  document.getElementById("about-section").hidden = !aboutText && !socials.childElementCount && !hasPlayer;
+  document.getElementById("about-body").classList.toggle("split", hasPlayer && !document.getElementById("about-text").hidden);
+
+  renderTimeline(me.timeline);
+}
+
+function validTrack(raw) {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const title = typeof raw.title === "string" ? raw.title.trim() : "";
+  const src = mediaUrl(raw.src);
+  if (!title || !src) {
+    return null;
+  }
+  return {
+    title,
+    artist: typeof raw.artist === "string" ? raw.artist.trim() : "",
+    src,
+    cover: raw.cover == null ? null : mediaUrl(raw.cover),
+  };
+}
+
+function updatePlayerLabels() {
+  if (!player) {
+    return;
+  }
+  const playing = !player.audio.paused && !player.audio.ended;
+  player.icon.textContent = playing ? "❚❚" : "▶";
+  player.word.textContent = t(playing ? "player.pause" : "player.play");
+  player.button.setAttribute("aria-label", t(playing ? "player.pauseAria" : "player.playAria", { title: player.track.title }));
+  player.error.textContent = t("player.error");
+}
+
+function stopPlayer() {
+  if (!player) {
+    return;
+  }
+  player.audio.pause();
+  player.audio.removeAttribute("src");
+  player.audio.load();
+  player.root.remove();
+  player = null;
+}
+
+function renderPlayer(raw) {
+  const box = document.getElementById("player");
+  const track = validTrack(raw);
+  if (!track) {
+    stopPlayer();
+    box.hidden = true;
+    return false;
+  }
+  if (player && player.track.src === track.src && player.track.cover === track.cover) {
+    player.track = track;
+    player.title.textContent = track.title;
+    player.artist.textContent = track.artist;
+    player.artist.hidden = !track.artist;
+    updatePlayerLabels();
+    box.hidden = false;
+    return true;
+  }
+  stopPlayer();
+
+  const vinyl = el("div", "vinyl");
+  const disc = el("div", "disc");
+  disc.setAttribute("aria-hidden", "true");
+  const label = el("div", "disc-label");
+  if (track.cover) {
+    const img = el("img");
+    img.alt = "";
+    img.decoding = "async";
+    img.loading = "lazy";
+    img.addEventListener("error", () => img.remove());
+    img.src = track.cover;
+    label.append(img);
+  }
+  disc.append(label);
+
+  const info = el("div", "track");
+  const title = el("p", "track-title", track.title);
+  const artist = el("p", "track-artist", track.artist);
+  artist.hidden = !track.artist;
+  const button = el("button", "play-btn");
+  button.type = "button";
+  const icon = el("span", null);
+  icon.setAttribute("aria-hidden", "true");
+  const word = el("span", null);
+  button.append(icon, word);
+  const error = el("p", "player-error");
+  error.hidden = true;
+  error.setAttribute("role", "status");
+  info.append(title, artist, button, error);
+  vinyl.append(disc, info);
+
+  // Никакого автоплея: файл не грузится, пока не нажмут «Слушать».
+  const audio = document.createElement("audio");
+  audio.preload = "none";
+  audio.src = track.src;
+
+  const sync = () => {
+    box.classList.toggle("is-playing", !audio.paused && !audio.ended);
+    updatePlayerLabels();
+  };
+  for (const name of ["play", "playing", "pause", "ended"]) {
+    audio.addEventListener(name, sync);
+  }
+  audio.addEventListener("error", () => {
+    error.hidden = false;
+    sync();
+  });
+  button.addEventListener("click", () => {
+    if (audio.paused || audio.ended) {
+      error.hidden = true;
+      audio.play().catch((err) => {
+        console.error(err);
+        error.hidden = false;
+        sync();
+      });
+    } else {
+      audio.pause();
+    }
+  });
+
+  const wrapper = el("div", null);
+  wrapper.append(vinyl, audio);
+  box.append(wrapper);
+  player = { root: wrapper, audio, button, icon, word, title, artist, error, track };
+  updatePlayerLabels();
+  box.hidden = false;
+  return true;
+}
+
+function timelineMeta(item) {
+  const parts = [];
+  const place = pick(item.place);
+  if (place) {
+    parts.push(place);
+  }
+  if (["study", "work", "project"].includes(item.kind)) {
+    parts.push(t(`timeline.${item.kind}`));
+  }
+  return parts.join(", ");
+}
+
+function renderTimeline(raw) {
+  const section = document.getElementById("timeline-section");
+  const list = document.getElementById("timeline");
+  list.replaceChildren();
+  const items = (Array.isArray(raw) ? raw : []).filter(
+    (item) => item && typeof item.start === "string" && item.start && pick(item.title),
+  );
+  if (!items.length) {
+    section.hidden = true;
+    return;
+  }
+  items.forEach((item, index) => {
+    const entry = el("li");
+    const end = typeof item.end === "string" && item.end ? item.end : t("timeline.now");
+    entry.append(el("p", "tl-when", `${item.start} – ${end}`));
+    const dot = el("span", "tl-dot");
+    dot.setAttribute("aria-hidden", "true");
+    // Маркеры идут по кругу радуги от первого события к последнему.
+    dot.dataset.hue = String(Math.round((index / Math.max(items.length, 2)) * 300));
+    dot.style.setProperty("background", rainbow(Number(dot.dataset.hue)));
+    entry.append(dot);
+    entry.append(el("h3", "tl-title", pick(item.title)));
+    const meta = timelineMeta(item);
+    if (meta) {
+      entry.append(el("p", "tl-meta", meta));
+    }
+    list.append(entry);
+  });
+  section.hidden = false;
+}
+
+function recolorTimeline() {
+  for (const dot of document.querySelectorAll(".tl-dot")) {
+    dot.style.setProperty("background", rainbow(Number(dot.dataset.hue) || 0));
   }
 }
 
+// --- Проекты --------------------------------------------------------------------
+
+function projectTitle(project) {
+  return project.title || project.slug || t("project.fallback");
+}
+
 function fillProject(target, project) {
-  if (project.description) {
-    target.append(el("p", "desc", project.description));
+  const description = pick(project.description);
+  if (description) {
+    target.append(el("p", "desc", description));
   }
   if (project.stack?.length) {
-    const stack = el("p", "stack");
+    const stack = el("ul", "stack");
     for (const item of project.stack) {
-      stack.append(el("span", null, item));
+      stack.append(el("li", null, item));
     }
     target.append(stack);
   }
@@ -158,6 +471,7 @@ function selectProject(index) {
   });
   const project = projectItems[index];
   if (project) {
+    selectedProject = index;
     const preview = document.getElementById("project-preview");
     preview.replaceChildren();
     fillProject(preview, project);
@@ -165,21 +479,29 @@ function selectProject(index) {
 }
 
 function bindStrip(strip) {
-  const track = strip.querySelector(".strip-track");
-  if (!track) {
-    return;
-  }
   let x = 0;
   let drag = null;
 
+  const track = () => strip.querySelector(".strip-track");
+
   function limit() {
-    return Math.min(0, strip.clientWidth - track.scrollWidth);
+    const node = track();
+    return node ? Math.min(0, strip.clientWidth - node.scrollWidth) : 0;
   }
 
   function apply() {
+    const node = track();
+    if (!node) {
+      return;
+    }
     x = Math.min(0, Math.max(limit(), x));
-    track.style.transform = `translate3d(${x}px, 0, 0)`;
+    node.style.transform = `translate3d(${x}px, 0, 0)`;
   }
+
+  strip.addEventListener("aboutme:reset", () => {
+    x = 0;
+    apply();
+  });
 
   strip.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) {
@@ -239,10 +561,24 @@ function bindStrip(strip) {
   );
   strip.addEventListener("keydown", (event) => {
     if (event.key === "ArrowRight") {
-      x -= 96;
+      event.preventDefault();
+      x -= 120;
       apply();
     } else if (event.key === "ArrowLeft") {
-      x += 96;
+      event.preventDefault();
+      x += 120;
+      apply();
+    }
+  });
+  // Ссылка в карточке получила фокус с клавиатуры — подвигаем ленту, чтобы её было видно.
+  strip.addEventListener("focusin", (event) => {
+    const card = event.target.closest?.(".card");
+    if (!card) {
+      return;
+    }
+    const left = card.offsetLeft;
+    if (left + x < 0 || left + card.offsetWidth + x > strip.clientWidth) {
+      x = -left;
       apply();
     }
   });
@@ -253,8 +589,9 @@ function renderProjects(payload) {
   const section = document.getElementById("projects-section");
   const index = document.getElementById("project-index");
   const strip = document.getElementById("project-strip");
-  projectItems = payload.projects || [];
+  projectItems = Array.isArray(payload?.projects) ? payload.projects : [];
   if (!projectItems.length) {
+    section.hidden = true;
     return;
   }
 
@@ -262,26 +599,36 @@ function renderProjects(payload) {
   const track = el("div", "strip-track");
   projectItems.forEach((project, projectIndex) => {
     const item = el("li");
-    const button = el("button", null, project.title || project.slug || "проект");
+    const button = el("button", null, projectTitle(project));
     button.type = "button";
     button.addEventListener("mouseenter", () => selectProject(projectIndex));
     button.addEventListener("focus", () => selectProject(projectIndex));
+    button.addEventListener("click", () => selectProject(projectIndex));
     item.append(button);
     index.append(item);
 
     const card = el("article", "card");
-    card.append(el("h3", null, project.title || project.slug || "проект"));
+    card.append(el("h3", null, projectTitle(project)));
     fillProject(card, project);
     track.append(card);
   });
 
   strip.replaceChildren(track);
-  bindStrip(strip);
-  selectProject(0);
+  strip.dispatchEvent(new Event("aboutme:reset"));
+  selectProject(Math.min(selectedProject, projectItems.length - 1));
   section.hidden = false;
 }
 
 // --- Скиллы: капсулы на Matter.js -------------------------------------------
+
+const CAPSULE_FONT = '600 15px "Mona Sans", "Segoe UI", system-ui, sans-serif';
+
+function capsuleColors() {
+  return {
+    fill: cssVar("--signal") || "#000000",
+    text: cssVar("--bg") || "#ffffff",
+  };
+}
 
 function loadMatter() {
   if (window.Matter) {
@@ -348,12 +695,9 @@ function mountPhysics(Matter, labels) {
       pixelRatio: ratio,
     },
   });
-  const styles = getComputedStyle(document.documentElement);
-  const gold = styles.getPropertyValue("--gold").trim() || "#e4c36a";
-  const shade = styles.getPropertyValue("--shade").trim() || "#0c100b";
-  const font = '14px "Segoe UI", system-ui, sans-serif';
+  const colors = capsuleColors();
   const measure = render.context;
-  measure.font = font;
+  measure.font = CAPSULE_FONT;
 
   const walls = [
     Matter.Bodies.rectangle(width / 2, height + 24, width + 120, 48, {
@@ -370,8 +714,8 @@ function mountPhysics(Matter, labels) {
     }),
   ];
   const bodies = labels.slice(0, 24).map((label, index) => {
-    const capsuleWidth = Math.max(72, Math.ceil(measure.measureText(label).width) + 36);
-    const capsuleHeight = 36;
+    const capsuleWidth = Math.max(72, Math.ceil(measure.measureText(label).width) + 40);
+    const capsuleHeight = 38;
     const span = Math.max(width - capsuleWidth - 24, 1);
     const x = capsuleWidth / 2 + 12 + Math.random() * span;
     // Капсулы стартуют над видимой областью и падают по очереди.
@@ -382,7 +726,7 @@ function mountPhysics(Matter, labels) {
       friction: 0.12,
       frictionAir: 0.02,
       label,
-      render: { fillStyle: gold, strokeStyle: gold, lineWidth: 0 },
+      render: { fillStyle: colors.fill, strokeStyle: colors.fill, lineWidth: 0 },
     });
     Matter.Body.setAngle(body, (Math.random() - 0.5) * 0.6);
     return body;
@@ -404,28 +748,41 @@ function mountPhysics(Matter, labels) {
   Matter.Composite.add(engine.world, mouseConstraint);
   render.mouse = mouse;
 
+  const state = { engine, render, runner: null, bodies, width, colors };
+
   Matter.Events.on(render, "afterRender", () => {
     const context = render.context;
     context.save();
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    context.font = font;
+    context.font = CAPSULE_FONT;
     context.textAlign = "center";
     context.textBaseline = "middle";
-    context.fillStyle = shade;
+    context.fillStyle = state.colors.text;
     for (const body of bodies) {
       context.save();
       context.translate(body.position.x, body.position.y);
       context.rotate(body.angle);
-      context.fillText(body.label, 0, 0);
+      context.fillText(body.label, 0, 1);
       context.restore();
     }
     context.restore();
   });
 
-  const runner = Matter.Runner.create();
-  Matter.Runner.run(runner, engine);
+  state.runner = Matter.Runner.create();
+  Matter.Runner.run(state.runner, engine);
   Matter.Render.run(render);
-  return { engine, render, runner, bodies, width };
+  return state;
+}
+
+function recolorPhysics() {
+  if (!physicsState) {
+    return;
+  }
+  physicsState.colors = capsuleColors();
+  for (const body of physicsState.bodies) {
+    body.render.fillStyle = physicsState.colors.fill;
+    body.render.strokeStyle = physicsState.colors.fill;
+  }
 }
 
 function shakeSkills() {
@@ -447,7 +804,7 @@ function renderSkillChips() {
   const box = document.getElementById("skills-static");
   box.replaceChildren();
   for (const label of stackLabels) {
-    box.append(el("span", "chip", label));
+    box.append(el("li", "chip", label));
   }
 }
 
@@ -461,9 +818,9 @@ async function syncSkills() {
   }
   section.hidden = false;
   renderSkillChips();
-  const usePhysics = wideQuery.matches && !reduceMotion && physicsVisible;
+  const usePhysics = wideQuery.matches && !calm() && physicsVisible;
   if (!usePhysics) {
-    if (!wideQuery.matches || reduceMotion) {
+    if (!wideQuery.matches || calm()) {
       stopPhysics();
     }
     return;
@@ -474,6 +831,11 @@ async function syncSkills() {
   }
   try {
     const Matter = await loadMatter();
+    try {
+      await document.fonts?.load(CAPSULE_FONT);
+    } catch (err) {
+      // Шрифт не догрузился — капсулы измерятся запасным.
+    }
     if (token !== physicsToken || !wideQuery.matches) {
       return;
     }
@@ -520,9 +882,15 @@ function watchSkills() {
 
 // --- Радужные символы под курсором в первом экране ----------------------------
 
+const GLYPH_CHARSET = "01{}[]<>/\\|=+-*#$%&?!~^:;ABCDEFabcdef";
+
+function randomGlyph() {
+  return GLYPH_CHARSET[Math.floor(Math.random() * GLYPH_CHARSET.length)];
+}
+
 function setupGlyphField() {
   const canvas = document.getElementById("glyphs");
-  if (!canvas || reduceMotion) {
+  if (!canvas || calm()) {
     return;
   }
   const context = canvas.getContext("2d");
@@ -534,17 +902,12 @@ function setupGlyphField() {
   const CELL = 18;
   const LIFE = 900;
   const RADIUS = 1.7;
-  const CHARSET = "01{}[]<>/\\|=+-*#$%&?!~^:;ABCDEFabcdef";
   const cells = new Map();
   let columns = 0;
   let rows = 0;
   let ratio = 1;
   let last = null;
   let frame = 0;
-
-  function randomChar() {
-    return CHARSET[Math.floor(Math.random() * CHARSET.length)];
-  }
 
   function resize() {
     const rect = canvas.getBoundingClientRect();
@@ -574,7 +937,7 @@ function setupGlyphField() {
         cells.set(r * columns + c, {
           c,
           r,
-          ch: randomChar(),
+          ch: randomGlyph(),
           hue: (now / 8 + c * 9 + r * 4) % 360,
           born: now - distance * 90,
         });
@@ -587,7 +950,7 @@ function setupGlyphField() {
     const now = performance.now();
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, canvas.width / ratio, canvas.height / ratio);
-    context.font = `600 ${Math.round(CELL * 0.78)}px ui-monospace, "Cascadia Mono", Consolas, monospace`;
+    context.font = `700 ${Math.round(CELL * 0.8)}px "Monaspace Neon", ui-monospace, Consolas, monospace`;
     context.textAlign = "center";
     context.textBaseline = "middle";
     for (const [key, cell] of cells) {
@@ -597,10 +960,10 @@ function setupGlyphField() {
         continue;
       }
       if (Math.random() < 0.06) {
-        cell.ch = randomChar();
+        cell.ch = randomGlyph();
       }
       const alpha = 1 - (age / LIFE) ** 2;
-      context.fillStyle = `hsla(${cell.hue}, 95%, 66%, ${alpha.toFixed(3)})`;
+      context.fillStyle = rainbow(cell.hue, alpha.toFixed(3));
       context.fillText(cell.ch, cell.c * CELL + CELL / 2, cell.r * CELL + CELL / 2);
     }
     if (cells.size) {
@@ -621,8 +984,8 @@ function setupGlyphField() {
     if (last) {
       const steps = Math.min(24, Math.floor(Math.hypot(x - last.x, y - last.y) / (CELL / 2)));
       for (let step = 1; step < steps; step += 1) {
-        const t = step / steps;
-        light(last.x + (x - last.x) * t, last.y + (y - last.y) * t, now);
+        const k = step / steps;
+        light(last.x + (x - last.x) * k, last.y + (y - last.y) * k, now);
       }
     }
     light(x, y, now);
@@ -633,33 +996,136 @@ function setupGlyphField() {
   }
 
   resize();
-  window.addEventListener("resize", resize);
+  if ("ResizeObserver" in window) {
+    new ResizeObserver(resize).observe(canvas);
+  } else {
+    window.addEventListener("resize", resize);
+  }
   window.addEventListener("pointermove", onMove, { passive: true });
   document.addEventListener("pointerleave", () => {
     last = null;
   });
 }
 
-// --- Появление секций при скролле --------------------------------------------
+// --- Эффекты терминала: matrix и party ------------------------------------------
 
-function setupReveal() {
-  if (reduceMotion || !("IntersectionObserver" in window)) {
+function fxCanvas(passive) {
+  const canvas = el("canvas", passive ? "fx is-passive" : "fx");
+  canvas.setAttribute("aria-hidden", "true");
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(window.innerWidth * ratio);
+  canvas.height = Math.round(window.innerHeight * ratio);
+  document.body.append(canvas);
+  const context = canvas.getContext("2d");
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  return { canvas, context, width: window.innerWidth, height: window.innerHeight };
+}
+
+let matrixStop = null;
+
+function startMatrix(onExit) {
+  if (matrixStop) {
     return;
   }
-  const targets = document.querySelectorAll(".reveal");
-  const observer = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) {
-          entry.target.classList.add("is-visible");
-          observer.unobserve(entry.target);
-        }
+  const { canvas, context, width, height } = fxCanvas(false);
+  const bg = parseHex(cssVar("--bg")) || [255, 255, 255];
+  const head = cssVar("--signal") || "#000000";
+  const trail = cssVar("--muted") || "#5c5c5c";
+  const SIZE = 16;
+  const drops = Array.from({ length: Math.ceil(width / SIZE) }, () => Math.floor(Math.random() * -40));
+  let frame = 0;
+  let lastStep = 0;
+
+  context.font = `500 ${SIZE - 2}px "Monaspace Neon", ui-monospace, Consolas, monospace`;
+  context.textAlign = "center";
+
+  function tick(now) {
+    frame = window.requestAnimationFrame(tick);
+    if (now - lastStep < 50) {
+      return;
+    }
+    lastStep = now;
+    context.fillStyle = `rgba(${bg[0]}, ${bg[1]}, ${bg[2]}, 0.16)`;
+    context.fillRect(0, 0, width, height);
+    drops.forEach((row, column) => {
+      const x = column * SIZE + SIZE / 2;
+      if (row >= 0) {
+        context.fillStyle = trail;
+        context.fillText(randomGlyph(), x, (row - 1) * SIZE);
+        context.fillStyle = head;
+        context.fillText(randomGlyph(), x, row * SIZE);
       }
-    },
-    { rootMargin: "0px 0px -12% 0px" },
-  );
-  targets.forEach((target) => observer.observe(target));
-  document.documentElement.classList.add("has-reveal");
+      drops[column] = row * SIZE > height && Math.random() > 0.96 ? Math.floor(Math.random() * -12) : row + 1;
+    });
+  }
+
+  function stop(event) {
+    if (event) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+    window.cancelAnimationFrame(frame);
+    window.removeEventListener("keydown", stop, true);
+    canvas.removeEventListener("pointerdown", stop);
+    canvas.remove();
+    matrixStop = null;
+    onExit();
+  }
+
+  context.fillStyle = `rgb(${bg[0]}, ${bg[1]}, ${bg[2]})`;
+  context.fillRect(0, 0, width, height);
+  frame = window.requestAnimationFrame(tick);
+  // Слушатель в фазе захвата: Esc закрывает только дождь, а не терминал под ним.
+  window.addEventListener("keydown", stop, true);
+  canvas.addEventListener("pointerdown", stop);
+  matrixStop = stop;
+}
+
+function startParty() {
+  const { canvas, context, width, height } = fxCanvas(true);
+  const COUNT = 160;
+  const LIFE = 1400;
+  const started = performance.now();
+  const originX = width / 2;
+  const originY = height / 2;
+  const sparks = Array.from({ length: COUNT }, (_, index) => {
+    const angle = (index / COUNT) * Math.PI * 2 + Math.random() * 0.2;
+    const speed = 4 + Math.random() * 9;
+    return {
+      x: originX,
+      y: originY,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 3,
+      hue: (index / COUNT) * 360,
+      ch: randomGlyph(),
+    };
+  });
+  context.font = `700 18px "Monaspace Neon", ui-monospace, Consolas, monospace`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  function tick(now) {
+    const age = now - started;
+    context.clearRect(0, 0, width, height);
+    if (age >= LIFE) {
+      canvas.remove();
+      return;
+    }
+    const alpha = 1 - (age / LIFE) ** 2;
+    for (const spark of sparks) {
+      spark.vy += 0.25;
+      spark.vx *= 0.985;
+      spark.x += spark.vx;
+      spark.y += spark.vy;
+      context.fillStyle = rainbow(spark.hue, alpha.toFixed(3));
+      context.fillText(spark.ch, spark.x, spark.y);
+    }
+    window.requestAnimationFrame(tick);
+  }
+
+  window.requestAnimationFrame(tick);
+  glitchName();
+  shakeSkills();
 }
 
 // --- Терминал ------------------------------------------------------------------
@@ -672,23 +1138,23 @@ function printLine(text, kind) {
 
 function healthLine(payload, ok) {
   if (!ok || !payload) {
-    return "API сейчас недоступен";
+    return t("term.apiDown");
   }
   const api = payload.status === "ok";
   const db = payload.database === "ok";
   if (api && db) {
-    return "Сервисы в порядке";
+    return t("term.allOk");
   }
-  return `API: ${payload.status || "нет"} · база: ${payload.database || "нет"}`;
+  return t("term.health", { api: payload.status || t("term.none"), db: payload.database || t("term.none") });
 }
 
 function scrollToSection(id) {
   const section = document.getElementById(id);
   if (!section || section.hidden) {
-    printLine("раздел пуст", "muted");
+    printLine(t("term.emptySection"), "muted");
     return false;
   }
-  section.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+  section.scrollIntoView({ behavior: calm() ? "auto" : "smooth", block: "start" });
   return true;
 }
 
@@ -712,29 +1178,30 @@ function slug(text) {
 
 const COMMAND_LIBRARY = {
   help: {
-    about: "список команд",
+    about: "cmd.help",
     run({ commands }) {
       for (const [name, command] of commands) {
-        const usage = command.usage ? `${name} ${command.usage}` : name;
-        printLine(`${usage.padEnd(16)} ${command.about}`, "muted");
+        const usage = command.usage ? `${name} ${t(command.usage)}` : name;
+        printLine(`${usage.padEnd(18)} ${t(command.about)}`, "muted");
       }
     },
   },
   whoami: {
-    about: "кто здесь живёт",
+    about: "cmd.whoami",
     run() {
       if (!meData?.name) {
-        printLine("пока неизвестно", "muted");
+        printLine(t("term.unknownYet"), "muted");
         return;
       }
       printLine(meData.name);
-      if (meData.headline) {
-        printLine(meData.headline, "muted");
+      const headline = pick(meData.headline);
+      if (headline) {
+        printLine(headline, "muted");
       }
     },
   },
   about: {
-    about: "к разделу «О себе»",
+    about: "cmd.about",
     run({ close }) {
       if (scrollToSection("about-section")) {
         close();
@@ -742,17 +1209,17 @@ const COMMAND_LIBRARY = {
     },
   },
   skills: {
-    about: "к стеку и встряхнуть капсулы",
+    about: "cmd.skills",
     run({ close }) {
       if (!scrollToSection("skills-section")) {
         return;
       }
       close();
-      window.setTimeout(shakeSkills, reduceMotion ? 0 : 450);
+      window.setTimeout(shakeSkills, calm() ? 0 : 450);
     },
   },
   projects: {
-    about: "к проектам",
+    about: "cmd.projects",
     run({ close }) {
       if (scrollToSection("projects-section")) {
         close();
@@ -760,29 +1227,29 @@ const COMMAND_LIBRARY = {
     },
   },
   links: {
-    about: "все ссылки",
+    about: "cmd.links",
     run() {
       const targets = openTargets();
       if (!targets.length) {
-        printLine("ссылок нет", "muted");
+        printLine(t("term.noLinks"), "muted");
         return;
       }
       for (const target of targets) {
-        printLine(`${slug(target.name).padEnd(16)} ${target.url}`, "muted");
+        printLine(`${slug(target.name).padEnd(18)} ${target.url}`, "muted");
       }
-      printLine("open <имя> — открыть", "muted");
+      printLine(t("term.openHint"), "muted");
     },
   },
   open: {
-    usage: "<имя>",
-    about: "открыть ссылку из links",
+    usage: "cmd.openUsage",
+    about: "cmd.open",
     complete() {
       return openTargets().map((target) => slug(target.name));
     },
     run({ args }) {
       const wanted = slug(args.join(" "));
       if (!wanted) {
-        printLine("какую? links — список", "error");
+        printLine(t("term.whichLink"), "error");
         return;
       }
       const targets = openTargets();
@@ -790,21 +1257,21 @@ const COMMAND_LIBRARY = {
         targets.find((item) => slug(item.name) === wanted) ||
         targets.find((item) => slug(item.name).startsWith(wanted));
       if (!target) {
-        printLine(`нет ссылки «${wanted}». links — список`, "error");
+        printLine(t("term.noLink", { name: wanted }), "error");
         return;
       }
-      printLine(`открываю ${target.url}`, "muted");
+      printLine(t("term.opening", { url: target.url }), "muted");
       window.open(safeUrl(target.url), "_blank", "noopener,noreferrer");
     },
   },
   clips: {
-    about: "страница с клипами",
+    about: "cmd.clips",
     run() {
       window.location.assign("/clips.html");
     },
   },
   status: {
-    about: "здоровье API и базы",
+    about: "cmd.status",
     async run() {
       try {
         const payload = await loadJson("/api/health");
@@ -815,14 +1282,74 @@ const COMMAND_LIBRARY = {
       }
     },
   },
+  theme: {
+    usage: "[light|dark]",
+    about: "cmd.theme",
+    complete() {
+      return ["light", "dark"];
+    },
+    run({ args }) {
+      const wanted = args[0];
+      const theme = window.aboutmeTheme;
+      if (!wanted) {
+        theme.toggle();
+      } else if (wanted === "light" || wanted === "dark") {
+        theme.set(wanted);
+      } else {
+        printLine(t("term.themeBad"), "error");
+        return;
+      }
+      printLine(t("term.themeSet", { theme: theme.get() }));
+    },
+  },
+  lang: {
+    usage: "[ru|en]",
+    about: "cmd.lang",
+    complete() {
+      return I18N.langs;
+    },
+    run({ args }) {
+      const wanted = args[0] || (I18N.get() === "ru" ? "en" : "ru");
+      if (!I18N.set(wanted)) {
+        printLine(t("term.langBad"), "error");
+        return;
+      }
+      printLine(t("term.langSet", { lang: I18N.get() }));
+    },
+  },
+  matrix: {
+    about: "cmd.matrix",
+    run({ focusInput }) {
+      if (calm()) {
+        printLine(t("term.matrixStill"), "muted");
+        return;
+      }
+      printLine(t("term.matrixOn"), "muted");
+      startMatrix(() => {
+        printLine(t("term.matrixOff"), "muted");
+        focusInput();
+      });
+    },
+  },
+  party: {
+    about: "cmd.party",
+    run() {
+      if (calm()) {
+        printLine(t("term.partyStill"));
+        return;
+      }
+      printLine(t("term.party"));
+      startParty();
+    },
+  },
   clear: {
-    about: "очистить экран",
+    about: "cmd.clear",
     run() {
       document.getElementById("terminal-log").replaceChildren();
     },
   },
   exit: {
-    about: "закрыть терминал",
+    about: "cmd.exit",
     run({ close }) {
       close();
     },
@@ -857,30 +1384,36 @@ function setupTerminal() {
   const menuBtn = document.getElementById("menu-btn");
   const form = document.getElementById("terminal-form");
   const input = document.getElementById("terminal-input");
-  const story = document.getElementById("story");
-  const topNav = document.getElementById("top-nav");
+  const outside = document.querySelectorAll("[data-inert-with-terminal]");
   const commands = enabledCommands();
   const history = [];
   let historyIndex = 0;
   let hinted = false;
 
+  function setOutsideInert(value) {
+    for (const node of outside) {
+      node.inert = value;
+    }
+  }
+
   function openTerminal() {
     terminal.hidden = false;
     menuBtn.setAttribute("aria-expanded", "true");
-    story.inert = true;
-    topNav.inert = true;
+    setOutsideInert(true);
     if (!hinted) {
       hinted = true;
-      printLine("help — список команд", "muted");
+      printLine(t("term.welcome"), "muted");
     }
     input.focus();
   }
 
   function closeTerminal() {
+    if (matrixStop) {
+      matrixStop();
+    }
     terminal.hidden = true;
     menuBtn.setAttribute("aria-expanded", "false");
-    story.inert = false;
-    topNav.inert = false;
+    setOutsideInert(false);
     menuBtn.focus({ preventScroll: true });
   }
 
@@ -980,40 +1513,65 @@ function setupTerminal() {
     const [name, ...args] = raw.toLowerCase().split(/\s+/);
     const command = commands.get(name);
     if (!command) {
-      printLine("нет такой команды. help — список.", "error");
+      printLine(t("term.unknown"), "error");
       return;
     }
     try {
-      await command.run({ args, commands, close: closeTerminal });
+      await command.run({ args, commands, close: closeTerminal, focusInput: () => input.focus() });
     } catch (err) {
       console.error(err);
-      printLine("команда упала, подробности в консоли", "error");
+      printLine(t("term.crashed"), "error");
     }
   });
 }
 
+// --- Смена языка и темы ----------------------------------------------------------
+
+function rerender() {
+  if (meData) {
+    renderMe(meData);
+  }
+  if (projectsData) {
+    renderProjects(projectsData);
+  }
+  if (statusKey) {
+    showStatus(statusKey);
+  }
+}
+
+window.addEventListener("aboutme:lang", rerender);
+window.addEventListener("aboutme:theme", () => {
+  recolorTimeline();
+  recolorPhysics();
+});
+
+wideQuery.addEventListener("change", () => {
+  syncSkills();
+});
+
+motionQuery.addEventListener("change", () => {
+  syncSkills();
+});
+
 async function main() {
   setupGlyphField();
-  setupReveal();
+  bindStrip(document.getElementById("project-strip"));
   try {
     const [me, projects] = await Promise.all([loadJson("/api/me"), loadJson("/api/projects")]);
     meData = me;
+    projectsData = projects;
     renderMe(me);
     renderProjects(projects);
-    stackLabels = uniqueStack(projects.projects || []);
+    stackLabels = uniqueStack(projectItems);
     syncSkills();
     watchSkills();
   } catch (err) {
-    showStatus("Не удалось загрузить данные с API.");
+    showStatus("status.loadFail");
     console.error(err);
   } finally {
     finishBoot();
     setupTerminal();
   }
 }
-
-wideQuery.addEventListener("change", () => {
-  syncSkills();
-});
 
 main();

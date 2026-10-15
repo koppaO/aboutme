@@ -21,17 +21,21 @@ function showStatus(message) {
   el.textContent = message;
 }
 
+function t(key) {
+  return window.aboutmeI18n ? window.aboutmeI18n.t(key) : key;
+}
+
 function loginError(status) {
   if (status === 429) {
-    return "Слишком много попыток. Подожди минуту.";
+    return t("login.tooMany");
   }
   if (status === 403) {
-    return "Вход только с https://koppa0.dev";
+    return t("login.origin");
   }
   if (status === 404 || status >= 500) {
-    return "Не удалось связаться с API.";
+    return t("login.noApi");
   }
-  return "Неверный логин или пароль.";
+  return t("login.wrong");
 }
 
 async function main() {
@@ -46,10 +50,8 @@ async function main() {
       return;
     }
   } catch (err) {
-    showStatus("Не удалось связаться с API.");
+    showStatus(t("login.noApi"));
     console.error(err);
-  } finally {
-    document.body.classList.remove("is-loading");
   }
 
   form.addEventListener("submit", async (event) => {
@@ -70,7 +72,7 @@ async function main() {
       }
       window.location.replace(nextTarget());
     } catch (err) {
-      showStatus("Не удалось связаться с API.");
+      showStatus(t("login.noApi"));
       console.error(err);
     }
   });
