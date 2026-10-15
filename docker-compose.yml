@@ -1,6 +1,7 @@
 services:
   nginx:
-    image: nginx:stable
+    # Тег для людей, digest — чтобы тег нельзя было тихо подменить.
+    image: nginx:1.30.6-alpine3.24@sha256:ff8328b4279ec385af48cde9ef486e7165ad74b7065cb3cd86c377384e2e2dd5
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"
       - "443:443"
@@ -9,6 +10,23 @@ services:
       - ./nginx/html:/usr/share/nginx/html:ro
       - ./nginx/certbot-www:/var/www/certbot:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
+    # Master остаётся root, чтобы прочитать privkey.pem (0600 root) и занять 80/443.
+    # Запросы обслуживают воркеры от пользователя nginx.
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /run
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - NET_BIND_SERVICE
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       api:
         condition: service_healthy
@@ -47,11 +65,15 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgres:16
+    # Мажор 16 менять только через pg_upgrade: данные лежат в pgdata.
+    # Debian, не alpine: другая libc меняет сортировку строк и ломает индексы.
+    image: postgres:16.15-trixie@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
     env_file:
       - .env
     volumes:
       - pgdata:/var/lib/postgresql/data
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s

@@ -7,3 +7,7 @@ __pycache__
 .python-version
 .env
 *.md
+nginx
+.github
+docs
+.claude
