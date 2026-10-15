@@ -127,6 +127,14 @@
   gap: 1rem;
 }
 
+.pair.is-skill {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+
+.group > .field-hint {
+  margin: -0.5rem 0 0;
+}
+
 .pair.is-dates .field {
   gap: 0.6rem;
 }
@@ -425,6 +433,7 @@
 
 @media (max-width: 719px) {
   .pair,
+  .pair.is-skill,
   .theme-grid {
     grid-template-columns: minmax(0, 1fr);
   }

@@ -79,3 +79,74 @@ def test_theme_drops_unknown_keys() -> None:
     body["grain"] = {"opacity": 1}
     assert schemas.parse_theme(body) == seed_theme()
     assert not schemas.is_current_theme(body)
+
+
+def _about_with_skills(skills):
+    return schemas.parse_about({"name": "n", "skills": skills})
+
+
+def test_skills_accepted_in_order() -> None:
+    skills = [
+        {"name": " Python ", "kind": "language", "extra": 1},
+        {"name": "FastAPI", "kind": "framework"},
+        {"name": "Postgres", "kind": "database"},
+        {"name": "Docker", "kind": "infra"},
+        {"name": "git", "kind": "tool"},
+    ]
+    assert _about_with_skills(skills)["skills"] == [
+        {"name": "Python", "kind": "language"},
+        {"name": "FastAPI", "kind": "framework"},
+        {"name": "Postgres", "kind": "database"},
+        {"name": "Docker", "kind": "infra"},
+        {"name": "git", "kind": "tool"},
+    ]
+
+
+def test_skills_missing_or_null_is_empty() -> None:
+    assert schemas.parse_about({"name": "n"})["skills"] == []
+    assert _about_with_skills(None)["skills"] == []
+
+
+def test_skill_name_clipped_to_limit() -> None:
+    parsed = _about_with_skills([{"name": "x" * 80, "kind": "tool"}])
+    assert parsed["skills"][0]["name"] == "x" * schemas.MAX_SKILL
+
+
+@pytest.mark.parametrize(
+    "skills",
+    [
+        [{"name": "Python", "kind": "language"}, {"name": "python", "kind": "tool"}],
+        [{"name": "Docker", "kind": "infra"}, {"name": " DOCKER ", "kind": "infra"}],
+    ],
+)
+def test_skills_reject_case_insensitive_duplicates(skills) -> None:
+    with pytest.raises(schemas.PayloadError):
+        _about_with_skills(skills)
+
+
+@pytest.mark.parametrize(
+    "skill",
+    [
+        {"name": "Python", "kind": "lang"},
+        {"name": "Python", "kind": "Language"},
+        {"name": "Python"},
+        {"name": "Python", "kind": 1},
+        {"name": "", "kind": "tool"},
+        {"name": "   ", "kind": "tool"},
+        {"kind": "tool"},
+        {"name": 5, "kind": "tool"},
+        "Python",
+    ],
+)
+def test_skills_reject_bad_items(skill) -> None:
+    with pytest.raises(schemas.PayloadError):
+        _about_with_skills([skill])
+
+
+def test_skills_limit() -> None:
+    skills = [{"name": f"s{i}", "kind": "tool"} for i in range(schemas.MAX_SKILLS)]
+    assert len(_about_with_skills(skills)["skills"]) == schemas.MAX_SKILLS
+    with pytest.raises(schemas.PayloadError):
+        _about_with_skills(skills + [{"name": "one-more", "kind": "tool"}])
+    with pytest.raises(schemas.PayloadError):
+        _about_with_skills({"name": "Python", "kind": "language"})

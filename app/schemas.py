@@ -26,9 +26,12 @@ MAX_PASSWORD = 256
 MAX_TIMELINE = 30
 MAX_DATE = 20
 MAX_TRACK = 200
+MAX_SKILLS = 40
+MAX_SKILL = 50
 LOGIN_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 MEDIA_RE = re.compile(r"^/media/[A-Za-z0-9._-]+$")
 TIMELINE_KINDS = frozenset({"study", "work", "project"})
+SKILL_KINDS = frozenset({"language", "framework", "database", "infra", "tool"})
 LANGS = ("ru", "en")
 
 
@@ -152,6 +155,28 @@ def _timeline(value: Any) -> list[dict[str, Any]]:
     return events
 
 
+def _skills(value: Any) -> list[dict[str, str]]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > MAX_SKILLS:
+        raise PayloadError("invalid skills")
+    skills: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            raise PayloadError("invalid skills")
+        name = _clip(item.get("name"), MAX_SKILL)
+        kind = item.get("kind")
+        if not name or not isinstance(kind, str) or kind not in SKILL_KINDS:
+            raise PayloadError("invalid skills")
+        key = name.casefold()
+        if key in seen:
+            raise PayloadError("duplicate skill")
+        seen.add(key)
+        skills.append({"name": name, "kind": kind})
+    return skills
+
+
 def _now_playing(value: Any) -> dict[str, Any] | None:
     if value is None:
         return None
@@ -182,6 +207,7 @@ def parse_about(raw: Any) -> dict[str, Any]:
         "about": _localized(raw.get("about"), MAX_ABOUT),
         "socials": _named_links(raw.get("socials") or [], MAX_SOCIALS),
         "timeline": _timeline(raw.get("timeline")),
+        "skills": _skills(raw.get("skills")),
         "now_playing": _now_playing(raw.get("now_playing")),
     }
 

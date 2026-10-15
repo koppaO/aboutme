@@ -44,6 +44,9 @@ def test_me_returns_about_file() -> None:
     assert body["headline"]["en"]
     assert body["now_playing"] is None
     assert {event["kind"] for event in body["timeline"]} <= schemas.TIMELINE_KINDS
+    names = [skill["name"] for skill in body["skills"]]
+    assert {"Python", "JavaScript", "FastAPI", "Postgres", "Docker", "nginx"} <= set(names)
+    assert {skill["kind"] for skill in body["skills"]} <= schemas.SKILL_KINDS
 
 
 def test_seed_files_are_already_in_api_shape() -> None:
@@ -84,6 +87,7 @@ def test_legacy_about_is_read_in_new_shape() -> None:
     assert body["headline"] == {"ru": "Студент", "en": ""}
     assert body["about"] == {"ru": "Текст", "en": ""}
     assert body["timeline"] == []
+    assert body["skills"] == []
     assert body["now_playing"] is None
     assert body["socials"][0]["name"] == "GitHub"
 
