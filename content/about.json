@@ -1,11 +1,59 @@
 {
   "name": "koppaO",
-  "headline": "Студент, собираю пет-проекты",
-  "about": "Заглушка.",
+  "headline": {
+    "ru": "Студент, собираю пет-проекты",
+    "en": "Student building side projects"
+  },
+  "about": {
+    "ru": "Заглушка.",
+    "en": "Placeholder."
+  },
   "socials": [
     {
       "name": "GitHub",
       "url": "https://github.com/koppaO"
     }
-  ]
+  ],
+  "timeline": [
+    {
+      "start": "2023",
+      "end": "2027",
+      "title": {
+        "ru": "Бакалавриат",
+        "en": "Bachelor's degree"
+      },
+      "place": {
+        "ru": "Университет (заглушка)",
+        "en": "University (placeholder)"
+      },
+      "kind": "study"
+    },
+    {
+      "start": "2025",
+      "end": null,
+      "title": {
+        "ru": "Личный сайт aboutme",
+        "en": "Personal site aboutme"
+      },
+      "place": {
+        "ru": "Пет-проект: FastAPI, Postgres, nginx",
+        "en": "Side project: FastAPI, Postgres, nginx"
+      },
+      "kind": "project"
+    },
+    {
+      "start": "2026-10",
+      "end": null,
+      "title": {
+        "ru": "Редизайн сайта: две темы, RU/EN, таймлайн",
+        "en": "Site redesign: two themes, RU/EN, timeline"
+      },
+      "place": {
+        "ru": "",
+        "en": ""
+      },
+      "kind": "project"
+    }
+  ],
+  "now_playing": null
 }

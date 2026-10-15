@@ -88,10 +88,17 @@ def test_login_sets_httponly_cookie() -> None:
 def test_put_theme_invalid_color_422() -> None:
     assert _login().status_code == 200
     body = seed_theme()
-    body["colors"]["--gold"] = "red"
+    body["dark"]["colors"]["--signal"] = "red"
     response = client.put("/theme", json=body, headers=ORIGIN)
     assert response.status_code == 422
-    assert client.get("/theme").json()["colors"]["--gold"] == seed_theme()["colors"]["--gold"]
+    assert client.get("/theme").json() == seed_theme()
+
+
+def test_put_theme_needs_both_modes_422() -> None:
+    assert _login().status_code == 200
+    body = seed_theme()
+    del body["dark"]
+    assert client.put("/theme", json=body, headers=ORIGIN).status_code == 422
 
 
 def test_put_me_invalid_url_422() -> None:
@@ -112,12 +119,13 @@ def test_put_me_invalid_url_422() -> None:
 def test_put_theme_roundtrip() -> None:
     assert _login().status_code == 200
     body = seed_theme()
-    body["colors"]["--gold"] = "#abc"
-    body["grain"]["opacity"] = 0.5
+    body["light"]["colors"]["--signal"] = "#ABC"
+    body["sun"] = {"top": 1, "right": 1, "size": 1}
     saved = client.put("/theme", json=body, headers=ORIGIN)
     assert saved.status_code == 200
-    assert saved.json()["colors"]["--gold"] == "#abc"
-    assert client.get("/theme").json()["grain"]["opacity"] == 0.5
+    assert saved.json()["light"]["colors"]["--signal"] == "#abc"
+    assert "sun" not in saved.json()
+    assert client.get("/theme").json() == saved.json()
 
 
 def test_login_rate_limited_429(monkeypatch) -> None:
@@ -236,8 +244,88 @@ def test_put_me_roundtrip() -> None:
     }
     saved = client.put("/me", json=body, headers=ORIGIN)
     assert saved.status_code == 200
-    assert saved.json()["headline"] == "x"
-    assert client.get("/me").json()["about"] == "y"
+    assert saved.json()["headline"] == {"ru": "x", "en": ""}
+    assert saved.json()["timeline"] == []
+    assert saved.json()["now_playing"] is None
+    assert client.get("/me").json() == saved.json()
+
+
+def _me_with(**fields):
+    body = {"name": "koppaO", "headline": "", "about": "", "socials": []}
+    body.update(fields)
+    return client.put("/me", json=body, headers=ORIGIN)
+
+
+def _track(**fields):
+    track = {"title": "Song", "artist": "Band", "src": "/media/song.mp3", "cover": None}
+    track.update(fields)
+    return track
+
+
+def _event(**fields):
+    event = {"start": "2023", "end": None, "title": "Uni", "place": "", "kind": "study"}
+    event.update(fields)
+    return event
+
+
+def test_put_me_localized_and_timeline_roundtrip() -> None:
+    assert _login().status_code == 200
+    saved = _me_with(
+        headline={"ru": "Привет", "en": "Hi", "de": "Hallo"},
+        timeline=[_event(), _event(start="2025-09", end="2026", kind="project")],
+        now_playing=_track(src="https://cdn.example.com/a.mp3", cover="/media/c.webp"),
+    )
+    assert saved.status_code == 200
+    body = saved.json()
+    assert body["headline"] == {"ru": "Привет", "en": "Hi"}
+    assert body["timeline"][0]["title"] == {"ru": "Uni", "en": ""}
+    assert body["timeline"][0]["end"] is None
+    assert [e["kind"] for e in body["timeline"]] == ["study", "project"]
+    assert body["now_playing"]["src"] == "https://cdn.example.com/a.mp3"
+    assert client.get("/me").json() == body
+
+
+def test_put_me_now_playing_null_ok() -> None:
+    assert _login().status_code == 200
+    saved = _me_with(now_playing=None)
+    assert saved.status_code == 200
+    assert saved.json()["now_playing"] is None
+
+
+@pytest.mark.parametrize("kind", ["school", "", None, 1, "Study"])
+def test_put_me_bad_timeline_kind_422(kind) -> None:
+    assert _login().status_code == 200
+    assert _me_with(timeline=[_event(kind=kind)]).status_code == 422
+
+
+def test_put_me_timeline_title_required_422() -> None:
+    assert _login().status_code == 200
+    assert _me_with(timeline=[_event(title={"ru": "", "en": "x"})]).status_code == 422
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        "/media/../secret.mp3",
+        "/media/..",
+        "/media/a/b.mp3",
+        "/etc/passwd",
+        "javascript:alert(1)",
+        "http://example.com/a.mp3",
+        "https://example.com/../a.mp3",
+        "https://user:pw@example.com/a.mp3",
+        "https://",
+        "data:audio/mp3;base64,AAAA",
+        "//example.com/a.mp3",
+        "https://example.com/" + "a" * 500,
+        "",
+        None,
+    ],
+)
+def test_put_me_bad_media_src_422(src) -> None:
+    assert _login().status_code == 200
+    assert _me_with(now_playing=_track(src=src)).status_code == 422
+    assert _me_with(now_playing=_track(cover=src or "javascript:x")).status_code == 422
 
 
 def test_put_projects_roundtrip() -> None:
@@ -256,6 +344,7 @@ def test_put_projects_roundtrip() -> None:
     saved = client.put("/projects", json=body, headers=ORIGIN)
     assert saved.status_code == 200
     assert saved.json()["projects"][0]["slug"] == "other"
+    assert saved.json()["projects"][0]["description"] == {"ru": "d", "en": ""}
     assert client.get("/projects").json()["projects"][0]["title"] == "other"
 
 

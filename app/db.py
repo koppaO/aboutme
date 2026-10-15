@@ -1,5 +1,6 @@
 import copy
 import json
+import logging
 import os
 import re
 import threading
@@ -10,6 +11,7 @@ from urllib.parse import quote_plus
 
 import psycopg
 
+from app import schemas
 from app.content import seed_about, seed_projects, seed_theme
 
 SITE_ROW_ID = 1
@@ -26,6 +28,13 @@ _pool: Queue[psycopg.Connection] | None = None
 _pool_size = 0
 _pool_lock = threading.Lock()
 _pool_url: str | None = None
+_log = logging.getLogger(__name__)
+_SEEDS = {"theme": seed_theme, "about": seed_about, "projects": seed_projects}
+_PARSERS = {
+    "theme": schemas.parse_theme,
+    "about": schemas.parse_about,
+    "projects": schemas.parse_projects,
+}
 
 
 class DuplicateUser(Exception):
@@ -152,12 +161,23 @@ def database_status() -> str | None:
     return "ok"
 
 
+def _seed(column: str) -> Any:
+    return _PARSERS[column](_SEEDS[column]())
+
+
 def _blank_site() -> dict[str, Any]:
-    return {
-        "theme": seed_theme(),
-        "about": seed_about(),
-        "projects": seed_projects(),
-    }
+    return {column: _seed(column) for column in ("theme", "about", "projects")}
+
+
+def _normalize(column: str, value: Any) -> Any:
+    """Bring a stored value to the current API shape; old rows predate it."""
+    if column == "theme" and not schemas.is_current_theme(value):
+        return _seed(column)
+    try:
+        return _PARSERS[column](value)
+    except schemas.PayloadError:
+        _log.warning("stored %s does not match the current format, serving the seed", column)
+        return _seed(column)
 
 
 def _empty_rbac() -> dict[str, Any]:
@@ -259,6 +279,23 @@ def _seed_first_admin_postgres(conn) -> None:
     )
 
 
+def _upgrade_legacy_theme(conn) -> None:
+    row = conn.execute(
+        "SELECT theme FROM site_state WHERE id = %s",
+        (SITE_ROW_ID,),
+    ).fetchone()
+    if row is None or schemas.is_current_theme(row[0]):
+        return
+    conn.execute(
+        """
+        UPDATE site_state
+        SET theme = %s::jsonb, updated_at = NOW()
+        WHERE id = %s
+        """,
+        (json.dumps(_seed("theme")), SITE_ROW_ID),
+    )
+
+
 def _init_postgres(url: str) -> None:
     seed = _blank_site()
     with psycopg.connect(url) as conn:
@@ -326,6 +363,8 @@ def _init_postgres(url: str) -> None:
                     json.dumps(seed["projects"]),
                 ),
             )
+        else:
+            _upgrade_legacy_theme(conn)
         _seed_catalogs_postgres(conn)
         _seed_first_admin_postgres(conn)
 
@@ -425,9 +464,9 @@ def _fetch_column(column: str) -> Any:
                 ).fetchone()
         if row is None:
             raise RuntimeError("site_state missing")
-        return _remember(column, row[0])
+        return _remember(column, _normalize(column, row[0]))
     assert _memory is not None
-    return _remember(column, _memory[column])
+    return _remember(column, _normalize(column, _memory[column]))
 
 
 def _store_column(column: str, value: Any) -> Any:
