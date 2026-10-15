@@ -95,16 +95,7 @@ def _media(value: Any) -> str:
     src = value.strip()
     if not src or len(src) > MAX_URL or ".." in src:
         raise PayloadError("invalid media")
-    if src.startswith("/"):
-        if not MEDIA_RE.fullmatch(src) or not src.rsplit("/", 1)[1].strip("."):
-            raise PayloadError("invalid media")
-        return src
-    if any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 or ch == "\\" for ch in src):
-        raise PayloadError("invalid media")
-    parsed = urlparse(src)
-    if src.split(":", 1)[0].lower() != "https" or parsed.scheme != "https":
-        raise PayloadError("invalid media")
-    if not parsed.hostname or parsed.username is not None or parsed.password is not None:
+    if not MEDIA_RE.fullmatch(src) or not src.rsplit("/", 1)[1].strip("."):
         raise PayloadError("invalid media")
     return src
 

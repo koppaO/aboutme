@@ -43,7 +43,7 @@ curl http://localhost:8080/api/projects
 Полное описание — в [`docs/api-contract.md`](docs/api-contract.md). Коротко:
 
 - `headline`, `about` и `description` проектов — объект `{"ru": "...", "en": "..."}`. В `PUT` и в `content/*.json` можно писать просто строку, она станет `ru`.
-- В `/me` есть `timeline` (до 30 событий, `kind` — `study`, `work` или `project`) и `now_playing` (плеер или `null`). Ссылки на трек и обложку — только `/media/<файл>` или `https://`.
+- В `/me` есть `timeline` (до 30 событий, `kind` — `study`, `work` или `project`) и `now_playing` (плеер или `null`). Трек и обложка — только свои файлы `/media/<файл>`, внешние URL отклоняются.
 - `/theme` отдаёт две темы, `light` и `dark`, у каждой шесть цветов: `--bg --ink --muted --line --panel --signal`.
 - Данные старого формата из Postgres читаются в новом виде, тема старого формата при старте api заменяется на тему по умолчанию.
 
