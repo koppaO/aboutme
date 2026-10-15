@@ -6,16 +6,26 @@ from typing import Any
 CONTENT_DIR = Path(__file__).resolve().parent.parent / "content"
 
 DEFAULT_THEME: dict[str, Any] = {
-    "colors": {
-        "--shade": "#0c100b",
-        "--text": "#f3ead4",
-        "--muted": "#cbbfa2",
-        "--gold": "#e4c36a",
-        "--fail": "#e8b4a8",
+    "light": {
+        "colors": {
+            "--bg": "#ffffff",
+            "--ink": "#000000",
+            "--muted": "#5c5c5c",
+            "--line": "#000000",
+            "--panel": "#f5f5f5",
+            "--signal": "#000000",
+        }
     },
-    "sun": {"top": -8, "right": 8, "size": 42},
-    "grain": {"opacity": 0.18},
-    "tree": {"opacity": 0.92},
+    "dark": {
+        "colors": {
+            "--bg": "#0f1633",
+            "--ink": "#dfe6ff",
+            "--muted": "#8f9bd0",
+            "--line": "#2a3566",
+            "--panel": "#0a1028",
+            "--signal": "#7cf0c8",
+        }
+    },
 }
 
 

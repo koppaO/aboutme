@@ -33,7 +33,19 @@ curl http://localhost:8080/api/me
 curl http://localhost:8080/api/projects
 ```
 
-Текст о себе и список проектов лежат в `content/*.json`. В Compose папка смонтирована в api: правка JSON сразу видна в `/api/me` и `/api/projects` (обнови страницу в браузере).
+Текст о себе и список проектов лежат в `content/*.json`. Без Postgres api берёт их при каждом старте.
+С Postgres это только сид: файлы читаются один раз, когда строки `site_state` ещё нет, дальше api отдаёт то, что в базе.
+На живом сайте текст меняется через `PUT /api/me` и `PUT /api/projects` под сессией админа.
+Локально, чтобы подхватить правку JSON, проще пересоздать базу: `docker compose -f docker-compose.yml -f docker-compose.local.yml down -v` (удалит данные Postgres) и снова `up`.
+
+## Формат API
+
+Полное описание — в [`docs/api-contract.md`](docs/api-contract.md). Коротко:
+
+- `headline`, `about` и `description` проектов — объект `{"ru": "...", "en": "..."}`. В `PUT` и в `content/*.json` можно писать просто строку, она станет `ru`.
+- В `/me` есть `timeline` (до 30 событий, `kind` — `study`, `work` или `project`) и `now_playing` (плеер или `null`). Ссылки на трек и обложку — только `/media/<файл>` или `https://`.
+- `/theme` отдаёт две темы, `light` и `dark`, у каждой шесть цветов: `--bg --ink --muted --line --panel --signal`.
+- Данные старого формата из Postgres читаются в новом виде, тема старого формата при старте api заменяется на тему по умолчанию.
 
 ## Docker Compose
 
