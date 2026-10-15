@@ -30,12 +30,20 @@
   --glitch-b: hsl(196 100% 34%);
 
   --sans: "Mona Sans", "Segoe UI", system-ui, sans-serif;
+  --text: var(--sans);
   --mono: "Monaspace Neon", ui-monospace, "Cascadia Mono", Consolas, monospace;
   --gutter: clamp(16px, 3.2vw, 40px);
   --rule: 1px solid var(--line);
   --head-h: 3.25rem;
 
   color-scheme: light;
+}
+
+/* В Mona Sans нет кириллицы. Чтобы во фразе «бэкенд на FastAPI» не смешивались
+   два рисунка букв, русский текст целиком идёт системным шрифтом, а Mona Sans
+   остаётся за латинскими именами: koppaO, бренд, названия проектов. */
+:root:lang(ru) {
+  --text: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
 [data-theme="dark"] {
@@ -73,7 +81,7 @@ body {
   min-height: 100vh;
   color: var(--ink);
   background: var(--bg);
-  font-family: var(--sans);
+  font-family: var(--text);
   font-size: 1.0625rem;
   font-stretch: 100%;
   line-height: 1.55;
@@ -210,6 +218,7 @@ body.is-ready .preloader {
 }
 
 .brand {
+  font-family: var(--sans);
   padding-left: var(--gutter) !important;
   font-weight: 750;
   font-stretch: 118%;
@@ -256,14 +265,20 @@ body.is-ready .preloader {
 }
 
 .lang button + button {
-  border-left: 0;
-  padding-left: 0;
+  position: relative;
 }
 
+/* Разделитель рисуется линией, а не символом «|»: текст из content попал бы
+   в доступное имя кнопки. */
 .lang button + button::before {
-  content: "|";
-  margin-right: 0.7rem;
-  color: var(--muted);
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 1px;
+  height: 1em;
+  margin-top: -0.5em;
+  background: var(--muted);
 }
 
 .lang button[aria-pressed="true"] {
@@ -326,6 +341,7 @@ body.is-ready .preloader {
 
 h1 {
   margin: 0;
+  font-family: var(--sans);
   font-size: clamp(4rem, 15.5vw, 10rem);
   font-weight: 850;
   font-stretch: 125%;
@@ -657,11 +673,7 @@ h3 {
   grid-template-columns: 9.5rem 1.25rem minmax(0, 1fr);
   column-gap: 0.9rem;
   align-items: baseline;
-  padding: 0.85rem 0;
-}
-
-.timeline li + li {
-  border-top: 1px solid var(--line);
+  padding: 0.6rem 0 1.1rem;
 }
 
 .timeline li::before {
@@ -672,7 +684,7 @@ h3 {
   align-self: stretch;
   width: 1px;
   background: var(--line);
-  margin: -0.85rem 0;
+  margin: -0.6rem 0 -1.1rem;
 }
 
 .tl-when {
@@ -787,6 +799,7 @@ h3 {
   padding: 1rem var(--gutter);
   background: none;
   border: 0;
+  font-family: var(--sans);
   font-size: clamp(1.375rem, 2.6vw, 2.125rem);
   font-weight: 700;
   font-stretch: 118%;
@@ -871,6 +884,7 @@ h3 {
 
 .card h3 {
   margin: 0 0 0.6rem;
+  font-family: var(--sans);
   font-size: 1.5rem;
   font-weight: 700;
   font-stretch: 118%;
@@ -1105,6 +1119,8 @@ h3 {
 
   .masthead a,
   .masthead button {
+    justify-content: center;
+    min-width: 2.75rem;
     padding: 0 0.65rem;
     font-size: 0.875rem;
   }

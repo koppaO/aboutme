@@ -356,17 +356,22 @@ function renderPlayer(raw) {
   for (const name of ["play", "playing", "pause", "ended"]) {
     audio.addEventListener(name, sync);
   }
-  audio.addEventListener("error", () => {
-    error.hidden = false;
+  // Текст ставится уже после показа блока, иначе role="status" его не озвучит.
+  const showError = () => {
     sync();
-  });
+    error.hidden = false;
+    error.textContent = "";
+    window.setTimeout(() => {
+      error.textContent = t("player.error");
+    }, 50);
+  };
+  audio.addEventListener("error", showError);
   button.addEventListener("click", () => {
     if (audio.paused || audio.ended) {
       error.hidden = true;
       audio.play().catch((err) => {
         console.error(err);
-        error.hidden = false;
-        sync();
+        showError();
       });
     } else {
       audio.pause();
@@ -601,6 +606,7 @@ function renderProjects(payload) {
     const item = el("li");
     const button = el("button", null, projectTitle(project));
     button.type = "button";
+    button.setAttribute("aria-controls", "project-preview");
     button.addEventListener("mouseenter", () => selectProject(projectIndex));
     button.addEventListener("focus", () => selectProject(projectIndex));
     button.addEventListener("click", () => selectProject(projectIndex));

@@ -35,7 +35,7 @@
       "timeline.work": "работа",
       "timeline.project": "проект",
       "footer.built": "Сайт работает на своём API: nginx и FastAPI.",
-      "footer.hint": "Нажми / чтобы открыть терминал.",
+      "footer.hint": "Нажми /, чтобы открыть терминал.",
       "status.loadFail": "Не удалось загрузить данные с API. Обнови страницу через минуту.",
       "clips.title": "Клипы",
       "clips.headline": "Здесь будут короткие видео с проектов.",
