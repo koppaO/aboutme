@@ -32,6 +32,10 @@
       "kind": "study"
     }
   ],
+  "skills": [
+    { "name": "Python", "kind": "language" },
+    { "name": "FastAPI", "kind": "framework" }
+  ],
   "now_playing": {
     "title": "Track",
     "artist": "Artist",
@@ -53,6 +57,9 @@
 | `timeline[].title` | `Localized`, до 200 символов на язык, `ru` обязателен. |
 | `timeline[].place` | `Localized`, до 200 символов на язык, может быть пустым. |
 | `timeline[].kind` | `"study"`, `"work"` или `"project"`. |
+| `skills` | До 40 технологий для блока «Стек», порядок сохраняется. Пустой список, если не заданы: тогда фронт берёт стек из проектов и по возможности сам определяет категорию. |
+| `skills[].name` | Строка до 50 символов, обязательна, без повторов без учёта регистра. |
+| `skills[].kind` | `"language"`, `"framework"`, `"database"`, `"infra"` или `"tool"`. От категории зависит цвет капсулы и фильтр. |
 | `now_playing` | Объект или `null`, если плеер не нужен. |
 | `now_playing.title`, `.artist` | Строки до 200 символов, `title` обязателен. |
 | `now_playing.src` | Обязателен. Только свой путь `^/media/[A-Za-z0-9._-]+$` (без `..`, без вложенных папок). Внешние URL не принимаются: CSP `default-src 'self'` их всё равно не загрузит. |
