@@ -247,6 +247,10 @@
     for (var j = 0; j < labelled.length; j += 1) {
       labelled[j].setAttribute("aria-label", t(labelled[j].getAttribute("data-i18n-aria-label")));
     }
+    var titled = base.querySelectorAll("[data-i18n-title]");
+    for (var m = 0; m < titled.length; m += 1) {
+      titled[m].setAttribute("title", t(titled[m].getAttribute("data-i18n-title")));
+    }
     var buttons = base.querySelectorAll("[data-lang]");
     for (var k = 0; k < buttons.length; k += 1) {
       buttons[k].setAttribute("aria-pressed", buttons[k].getAttribute("data-lang") === lang ? "true" : "false");
