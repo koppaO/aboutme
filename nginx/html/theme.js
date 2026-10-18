@@ -81,6 +81,20 @@
         root.style.removeProperty(key);
       }
     });
+    syncThemeColor();
+  }
+
+  // В <head> два theme-color по prefers-color-scheme. Если тему выбрали вручную
+  // или она пришла из api, панель браузера должна совпасть с фоном страницы.
+  function syncThemeColor() {
+    var metas = document.querySelectorAll('meta[name="theme-color"]');
+    var bg = window.getComputedStyle(root).getPropertyValue("--bg").trim();
+    if (!bg) {
+      return;
+    }
+    for (var i = 0; i < metas.length; i += 1) {
+      metas[i].setAttribute("content", bg);
+    }
   }
 
   function syncButtons() {
