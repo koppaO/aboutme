@@ -38,7 +38,7 @@ jobs:
       contents: read # checkout и diff для плана выкладки
     steps:
       - name: Check out repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -81,7 +81,7 @@ jobs:
           echo "plan=$plan" >> "$GITHUB_OUTPUT"
 
       - name: Deploy to VPS
-        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         env:
           DEPLOY_SHA: ${{ github.sha }}
           DEPLOY_PLAN: ${{ steps.plan.outputs.plan }}
