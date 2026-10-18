@@ -4,6 +4,7 @@
 #   gixy     — конфиги nginx
 #   nginx -t — синтаксис конфигов на том же образе, что в docker-compose.yml
 #   hadolint — Dockerfile
+#   shellcheck — скрипт выкладки deploy/deploy.sh
 # Версии Python-инструментов и их хэши — в .github/scanners-requirements.txt.
 
 name: security
@@ -143,3 +144,19 @@ jobs:
           docker run --rm -i
           hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d
           < Dockerfile
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Lint deploy script
+        run: >
+          docker run --rm -v "$PWD:/mnt:ro" -w /mnt
+          koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
+          --severity=style deploy/deploy.sh
