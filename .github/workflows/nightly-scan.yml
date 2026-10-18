@@ -1,0 +1,98 @@
+# Ночной скан того, что реально работает на сервере. Новые CVE появляются
+# и после выкладки, а CI сканирует только на push. Упавший прогон приходит
+# письмом от GitHub.
+
+name: nightly-scan
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: nightly-scan
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout
+      packages: read # pull образа api из ghcr.io, пока пакет не публичный
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Образы nginx и postgres берутся из docker-compose.yml, чтобы digest
+      # не приходилось держать в двух местах.
+      - name: Collect images
+        id: images
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          pick() {
+            grep -E "^[[:space:]]+image: $1:[^[:space:]]+@sha256:[0-9a-f]{64}$" docker-compose.yml \
+              | awk '{print $2}' | head -n1
+          }
+          nginx="$(pick nginx)"
+          postgres="$(pick postgres)"
+          [ -n "$nginx" ] && [ -n "$postgres" ] || { echo "pinned images not found" >&2; exit 1; }
+          {
+            echo "api=ghcr.io/${OWNER,,}/aboutme-api:main"
+            echo "nginx=$nginx"
+            echo "postgres=$postgres"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Scan api image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.images.outputs.api }}
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      # always(): даже если в api что-то нашлось, остальные образы всё равно сканируются.
+      - name: Scan nginx image
+        if: always() && steps.images.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.images.outputs.nginx }}
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Scan postgres image
+        if: always() && steps.images.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.images.outputs.postgres }}
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Scan Dockerfile and configs
+        if: always() && steps.images.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: "1"
