@@ -1,0 +1,139 @@
+# Узкие сканеры безопасности. Любая находка валит проверку.
+#   zizmor   — сами workflows GitHub Actions
+#   ruff     — Python, включая правила Bandit (S)
+#   gixy     — конфиги nginx
+#   nginx -t — синтаксис конфигов на том же образе, что в docker-compose.yml
+#   hadolint — Dockerfile
+# Версии Python-инструментов и их хэши — в .github/scanners-requirements.txt.
+
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install scanners
+        run: "pip install --require-hashes --only-binary=:all: -r .github/scanners-requirements.txt"
+
+      # Онлайн-режим: с токеном zizmor ещё проверяет подменённые коммиты
+      # и actions с известными уязвимостями.
+      - name: Audit workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: zizmor --persona auditor --min-severity low --format github .github/
+
+  ruff:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install scanners
+        run: "pip install --require-hashes --only-binary=:all: -r .github/scanners-requirements.txt"
+
+      - name: Lint Python
+        run: ruff check --output-format github .
+
+  gixy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install scanners
+        run: "pip install --require-hashes --only-binary=:all: -r .github/scanners-requirements.txt"
+
+      - name: Analyze nginx configs
+        run: gixy nginx/default.conf nginx/local.conf
+
+  nginx-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout
+    env:
+      # Тот же образ, что в docker-compose.yml.
+      NGINX_IMAGE: nginx:1.30.6-alpine3.24@sha256:ff8328b4279ec385af48cde9ef486e7165ad74b7065cb3cd86c377384e2e2dd5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # default.conf ждёт сертификат Let's Encrypt. Для проверки синтаксиса
+      # хватает самоподписанного, он живёт только в этом job.
+      - name: Make a throwaway certificate
+        run: |
+          mkdir -p "$RUNNER_TEMP/le/live/koppa0.dev"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=koppa0.dev" \
+            -keyout "$RUNNER_TEMP/le/live/koppa0.dev/privkey.pem" \
+            -out "$RUNNER_TEMP/le/live/koppa0.dev/fullchain.pem"
+
+      - name: Test default.conf
+        run: >
+          docker run --rm --add-host api:127.0.0.1
+          -v "$PWD/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro"
+          -v "$RUNNER_TEMP/le:/etc/letsencrypt:ro"
+          "$NGINX_IMAGE" nginx -t
+
+      - name: Test local.conf
+        run: >
+          docker run --rm --add-host api:127.0.0.1
+          -v "$PWD/nginx/local.conf:/etc/nginx/conf.d/default.conf:ro"
+          "$NGINX_IMAGE" nginx -t
+
+  hadolint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Lint Dockerfile
+        run: >
+          docker run --rm -i
+          hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d
+          < Dockerfile
