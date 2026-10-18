@@ -1,7 +1,7 @@
 # Выкладка на VPS только после тех же проверок, что и на pull request.
 # ci.yml собирает и проверяет образ api и публикует его в GHCR. Сюда приходит
 # его digest, и сервер скачивает ровно этот образ, ничего не собирая сам.
-# Сама выкладка с проверкой и откатом — deploy/deploy.sh.
+# Сама выкладка с проверкой и откатом — .github/scripts/deploy.sh.
 # content/*.json в уже заполненную Postgres не перечитывается, рестарт api это не меняет.
 
 name: cd
@@ -31,7 +31,7 @@ jobs:
 
   deploy:
     needs: checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Секреты SSH живут только в этом environment, а он доступен только ветке main.
     environment:
       name: production
@@ -65,7 +65,7 @@ jobs:
             # Копия скрипта: при откате git checkout может поменять файл в рабочей копии.
             runner="$(mktemp)"
             trap 'rm -f "$runner"' EXIT
-            cp deploy/deploy.sh "$runner"
+            cp .github/scripts/deploy.sh "$runner"
             bash "$runner" "$API_IMAGE" "$prev_sha"
 
       # Ещё одна проверка снаружи: DNS, сертификат и nginx глазами посетителя.

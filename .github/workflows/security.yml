@@ -4,15 +4,15 @@
 #   gixy     — конфиги nginx
 #   nginx -t — синтаксис конфигов на том же образе, что в docker-compose.yml
 #   hadolint — Dockerfile
-#   shellcheck — скрипт выкладки deploy/deploy.sh
+#   shellcheck — скрипт выкладки .github/scripts/deploy.sh
 # Версии Python-инструментов и их хэши — в .github/scanners-requirements.txt.
 
 name: security
 
+# Только на pull request: в main без зелёного security ничего не попадает
+# (ruleset), так что повторный прогон после мержа ничего бы не проверил.
 on:
   pull_request:
-  push:
-    branches: [main]
 
 permissions: {}
 
@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   zizmor:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout
     steps:
@@ -49,7 +49,7 @@ jobs:
         run: zizmor --persona auditor --min-severity low --format github .github/
 
   ruff:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout
     steps:
@@ -72,7 +72,7 @@ jobs:
         run: ruff check --output-format github .
 
   gixy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout
     steps:
@@ -95,7 +95,7 @@ jobs:
         run: gixy nginx/default.conf nginx/local.conf
 
   nginx-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout
     env:
@@ -130,7 +130,7 @@ jobs:
           "$NGINX_IMAGE" nginx -t
 
   hadolint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout
     steps:
@@ -146,7 +146,7 @@ jobs:
           < Dockerfile
 
   shellcheck:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout
     steps:
@@ -159,4 +159,4 @@ jobs:
         run: >
           docker run --rm -v "$PWD:/mnt:ro" -w /mnt
           koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
-          --severity=style deploy/deploy.sh
+          --severity=style .github/scripts/deploy.sh

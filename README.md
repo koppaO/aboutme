@@ -125,7 +125,7 @@ docker build --target test .
 Пуш в `main` запускает GitHub Actions:
 1. **Проверки:** тесты, поиск случайно закоммиченных секретов (gitleaks), проверка образа на уязвимости (Trivy).
 2. **Образ:** тот самый образ, на котором шли тесты и Trivy, публикуется в `ghcr.io/koppao/aboutme-api` с тегами `sha-<коммит>` и `main`. К нему прикладываются аттестации: кто и из какого коммита его собрал (provenance) и список пакетов внутри (SBOM). Проверить их можно так: `gh attestation verify oci://ghcr.io/koppao/aboutme-api:main --repo koppaO/aboutme`.
-3. **Деплой:** если проверки прошли, GitHub заходит на сервер по SSH (ключ и адрес хранятся в environment `production`, доступном только ветке `main`, а ключ хоста сверяется по fingerprint) и запускает [`deploy/deploy.sh`](deploy/deploy.sh):
+3. **Деплой:** если проверки прошли, GitHub заходит на сервер по SSH (ключ и адрес хранятся в environment `production`, доступном только ветке `main`, а ключ хоста сверяется по fingerprint) и запускает [`.github/scripts/deploy.sh`](.github/scripts/deploy.sh):
    - на сервере ничего не собирается, образ api скачивается из GHCR по точному digest. Digest записывается в `docker-compose.override.yml` — его не надо коммитить, он есть только на сервере;
    - пересоздаются только сервисы, у которых поменялся образ или настройки;
    - после подъёма скрипт ждёт healthy, проверяет конфиг nginx и сам сайт через nginx;
@@ -149,10 +149,19 @@ docker build --target test .
 ## Структура
 
 ```
-app/            API на FastAPI
-content/        тексты и проекты для первого запуска
-docs/           описание API
-nginx/html/     сайт и админка
-nginx/*.conf    настройки nginx: default.conf для сервера, local.conf для своего компьютера
-tests/          тесты
+app/                       API на FastAPI
+tests/                     тесты api
+content/                   тексты и проекты для первого запуска
+docs/api-contract.md       формат всех ответов API
+nginx/html/                сайт и админка (статика, без сборщика)
+nginx/default.conf         nginx на сервере, с HTTPS
+nginx/local.conf           nginx для своего компьютера, без HTTPS
+.github/workflows/         CI/CD: проверки, сканеры, выкладка, ночной скан
+.github/scripts/deploy.sh  выкладка на сервере с проверкой и откатом
+.github/dependabot.yml     еженедельные обновления зависимостей
+Dockerfile                 образ api: стадии deps, test и runtime
+docker-compose.yml         стек на сервере: nginx, api, postgres
+docker-compose.local.yml   добавка для своего компьютера: сборка api, порт 8080
+pyproject.toml             настройки pytest и ruff
+requirements*.txt          зависимости api с точными версиями
 ```

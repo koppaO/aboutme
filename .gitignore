@@ -1,14 +1,24 @@
+# Секреты: настоящий .env есть только локально и на сервере.
 .env
 .env.*
 !.env.example
+# На всякий случай: однажды в историю уже попал файл с кукой сессии.
+cookies.txt
+
+# Python
 .venv/
 venv/
 __pycache__/
-.pytest_cache/
 *.py[cod]
 .python-version
+.pytest_cache/
+.ruff_cache/
+
+# Сервер
+# certbot кладёт сюда файлы проверки домена.
 nginx/certbot-www/.well-known/
-cookies.txt
-.claude/
-# Пишет deploy/deploy.sh на сервере: digest образа api.
+# Пишет .github/scripts/deploy.sh: digest образа api.
 docker-compose.override.yml
+
+# Локальные инструменты
+.claude/
