@@ -4,13 +4,14 @@ import logging
 import os
 import re
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 from queue import Empty, Queue
 from typing import Any, Iterator
 from urllib.parse import quote_plus
 
 import psycopg
+from psycopg import sql
 
 from app import schemas
 from app.content import seed_about, seed_projects, seed_theme
@@ -22,6 +23,13 @@ ADMIN_ROLE = "admin"
 _POOL_MAX = 8
 
 _memory: dict[str, Any] | None = None
+
+
+def _mem() -> dict[str, Any]:
+    # Явная проверка вместо assert: assert пропадает при запуске python -O.
+    if _memory is None:
+        raise RuntimeError("memory store not initialized")
+    return _memory
 _ready = False
 _postgres = False
 _cache: dict[str, Any] = {}
@@ -92,10 +100,9 @@ def close_pool() -> None:
 
 def _discard(conn: psycopg.Connection) -> None:
     global _pool_size
-    try:
+    # Соединение и так выбрасываем: ошибка при закрытии ничего не меняет.
+    with suppress(Exception):
         conn.close()
-    except Exception:
-        pass
     with _pool_lock:
         _pool_size = max(0, _pool_size - 1)
 
@@ -214,7 +221,7 @@ def _bootstrap_login() -> str | None:
 
 
 def _seed_first_admin_memory() -> None:
-    assert _memory is not None
+    _mem()
     if _memory["users"]:
         return
     login = _bootstrap_login()
@@ -466,7 +473,7 @@ def _fetch_column(column: str) -> Any:
     if _postgres:
         with _pg() as conn:
             row = conn.execute(
-                f"SELECT {column} FROM site_state WHERE id = %s",
+                sql.SQL("SELECT {} FROM site_state WHERE id = %s").format(sql.Identifier(column)),
                 (SITE_ROW_ID,),
             ).fetchone()
         if row is None:
@@ -476,13 +483,13 @@ def _fetch_column(column: str) -> Any:
             _init_postgres(url)
             with _pg() as conn:
                 row = conn.execute(
-                    f"SELECT {column} FROM site_state WHERE id = %s",
+                    sql.SQL("SELECT {} FROM site_state WHERE id = %s").format(sql.Identifier(column)),
                     (SITE_ROW_ID,),
                 ).fetchone()
         if row is None:
             raise RuntimeError("site_state missing")
         return _remember(column, _normalize(column, row[0]))
-    assert _memory is not None
+    _mem()
     return _remember(column, _normalize(column, _memory[column]))
 
 
@@ -492,15 +499,17 @@ def _store_column(column: str, value: Any) -> Any:
     if _postgres:
         with _pg() as conn:
             conn.execute(
-                f"""
-                UPDATE site_state
-                SET {column} = %s::jsonb, updated_at = NOW()
-                WHERE id = %s
-                """,
+                sql.SQL(
+                    """
+                    UPDATE site_state
+                    SET {} = %s::jsonb, updated_at = NOW()
+                    WHERE id = %s
+                    """
+                ).format(sql.Identifier(column)),
                 (json.dumps(value), SITE_ROW_ID),
             )
         return _remember(column, value)
-    assert _memory is not None
+    _mem()
     _memory[column] = copy.deepcopy(value)
     return _remember(column, value)
 
@@ -554,7 +563,7 @@ def get_user_by_login(login: str) -> dict[str, Any] | None:
         if row is None:
             return None
         return _user_from_row(row)
-    assert _memory is not None
+    _mem()
     user = _memory["users"].get(login)
     if user is None:
         return None
@@ -575,7 +584,7 @@ def role_has_resource(role_id: int, key: str) -> bool:
                 (role_id, key),
             ).fetchone()
         return row is not None
-    assert _memory is not None
+    _mem()
     resource_id = next(
         (item["id"] for item in _memory["resources"].values() if item["key"] == key),
         None,
@@ -600,7 +609,7 @@ def role_resources(role_id: int) -> list[str]:
             ).fetchall()
         granted = {row[0] for row in rows}
     else:
-        assert _memory is not None
+        _mem()
         keys = {item["id"]: item["key"] for item in _memory["resources"].values()}
         granted = {
             keys[resource_id]
@@ -616,7 +625,7 @@ def role_id_by_name(name: str) -> int | None:
         with _pg() as conn:
             row = conn.execute("SELECT id FROM roles WHERE name = %s", (name,)).fetchone()
         return None if row is None else int(row[0])
-    assert _memory is not None
+    _mem()
     for role in _memory["roles"].values():
         if role["name"] == name:
             return int(role["id"])
@@ -634,9 +643,10 @@ def create_role(name: str) -> int:
                 "INSERT INTO roles (name) VALUES (%s) RETURNING id",
                 (name,),
             ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("insert returned no row")
         return int(row[0])
-    assert _memory is not None
+    _mem()
     role_id = int(_memory["ids"]["roles"])
     _memory["ids"]["roles"] = role_id + 1
     _memory["roles"][role_id] = {"id": role_id, "name": name}
@@ -671,7 +681,7 @@ def set_role_resources(role_name: str, keys: list[str]) -> None:
             finally:
                 conn.autocommit = True
         return
-    assert _memory is not None
+    _mem()
     _memory["role_resources"] = {
         pair for pair in _memory["role_resources"] if pair[0] != role_id
     }
@@ -700,9 +710,10 @@ def create_user(login: str, password_hash: str, role_name: str, status: bool = T
                 ).fetchone()
             except psycopg.errors.UniqueViolation as exc:
                 raise DuplicateUser(login) from exc
-        assert row is not None
+        if row is None:
+            raise RuntimeError("insert returned no row")
         return _user_from_row(row)
-    assert _memory is not None
+    _mem()
     user_id = int(_memory["ids"]["users"])
     _memory["ids"]["users"] = user_id + 1
     user = {
@@ -722,7 +733,7 @@ def set_user_status(login: str, status: bool) -> None:
         with _pg() as conn:
             conn.execute("UPDATE users SET status = %s WHERE login = %s", (status, login))
         return
-    assert _memory is not None
+    _mem()
     user = _memory["users"].get(login)
     if user is not None:
         user["status"] = status
@@ -737,7 +748,7 @@ def set_password_hash(user_id: int, password_hash: str) -> None:
                 (password_hash, user_id),
             )
         return
-    assert _memory is not None
+    _mem()
     for user in _memory["users"].values():
         if user["id"] == user_id:
             user["password_hash"] = password_hash
@@ -759,7 +770,7 @@ def create_session(id_hash: str, user_id: int, password_tag: str, created: float
                 (id_hash, user_id, password_tag, _utc(created), _utc(expires)),
             )
         return
-    assert _memory is not None
+    _mem()
     _memory["sessions"][id_hash] = {
         "user_id": user_id,
         "password_tag": password_tag,
@@ -790,7 +801,7 @@ def get_session(id_hash: str) -> dict[str, Any] | None:
             "expires_at": row[1].timestamp(),
             "user": _user_from_row(row[2:]),
         }
-    assert _memory is not None
+    _mem()
     stored = _memory["sessions"].get(id_hash)
     if stored is None:
         return None
@@ -813,7 +824,7 @@ def delete_session(id_hash: str) -> None:
         with _pg() as conn:
             conn.execute("DELETE FROM sessions WHERE id_hash = %s", (id_hash,))
         return
-    assert _memory is not None
+    _mem()
     _memory["sessions"].pop(id_hash, None)
 
 
@@ -823,7 +834,7 @@ def purge_sessions(now: float) -> None:
         with _pg() as conn:
             conn.execute("DELETE FROM sessions WHERE expires_at <= %s", (_utc(now),))
         return
-    assert _memory is not None
+    _mem()
     expired = [key for key, row in _memory["sessions"].items() if row["expires_at"] <= now]
     for key in expired:
         _memory["sessions"].pop(key, None)
