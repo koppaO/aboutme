@@ -1,4 +1,9 @@
 services:
+  api:
+    # Локально образ собирается из исходников, а не скачивается из GHCR.
+    image: aboutme-api:local
+    build: .
+
   nginx:
     ports: !override
       - "${NGINX_HTTP_PORT:-8080}:80"

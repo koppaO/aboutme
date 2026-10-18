@@ -10,3 +10,5 @@ __pycache__/
 nginx/certbot-www/.well-known/
 cookies.txt
 .claude/
+# Пишет deploy/deploy.sh на сервере: digest образа api.
+docker-compose.override.yml
