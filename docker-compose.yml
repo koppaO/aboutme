@@ -33,7 +33,11 @@ services:
     restart: unless-stopped
 
   api:
-    build: .
+    # На сервере образ только скачивается: точный digest задаёт
+    # docker-compose.override.yml, его пишет deploy/deploy.sh. Тег main здесь —
+    # запасной вариант, если override ещё нет. Локально образ собирается
+    # из исходников (build в docker-compose.local.yml).
+    image: ghcr.io/koppao/aboutme-api:main
     env_file:
       - .env
     environment:
@@ -68,8 +72,12 @@ services:
     # Мажор 16 менять только через pg_upgrade: данные лежат в pgdata.
     # Debian, не alpine: другая libc меняет сортировку строк и ломает индексы.
     image: postgres:16.15-trixie@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
-    env_file:
-      - .env
+    # Только свои три переменные, а не весь .env: SESSION_SECRET и хэш пароля
+    # админа базе ни к чему. Значения подставляются из того же .env.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
     security_opt:

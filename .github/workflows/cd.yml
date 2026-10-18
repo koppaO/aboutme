@@ -1,11 +1,8 @@
 # Выкладка на VPS только после тех же проверок, что и на pull request.
-# План по diff этого push:
-#   app/, Dockerfile, requirements.txt, .dockerignore -> пересобрать api
-#   nginx/, кроме nginx/local.conf -> перечитать конфиг nginx
-#   docker-compose.yml -> сверить все сервисы
-#   тесты, README, локальный compose, content/ -> только git на сервере
+# ci.yml собирает и проверяет образ api и публикует его в GHCR. Сюда приходит
+# его digest, и сервер скачивает ровно этот образ, ничего не собирая сам.
+# Сама выкладка с проверкой и откатом — deploy/deploy.sh.
 # content/*.json в уже заполненную Postgres не перечитывается, рестарт api это не меняет.
-# После пересоздания api nginx перечитывает upstream: имя api резолвится при старте.
 
 name: cd
 
@@ -32,129 +29,57 @@ jobs:
       attestations: write # аттестации provenance и SBOM
     uses: $/.github/workflows/ci.yml
 
-  # TODO: перенести SSH_* в environment production (только ветка main) и добавить
-  # здесь `environment: production`. Пока это не сделано в настройках GitHub,
-  # zizmor.yml временно разрешает эти секреты вне environment.
   deploy:
     needs: checks
     runs-on: ubuntu-latest
-    permissions:
-      contents: read # checkout и diff для плана выкладки
+    # Секреты SSH живут только в этом environment, а он доступен только ветке main.
+    environment:
+      name: production
+      url: https://koppa0.dev
+    permissions: {}
     steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Choose services
-        id: plan
-        env:
-          BEFORE: ${{ github.event.before }}
-          AFTER: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          plan=all
-          if [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-            all=0
-            api=0
-            nginx=0
-            while IFS= read -r file; do
-              [ -n "$file" ] || continue
-              case "$file" in
-                docker-compose.yml) all=1 ;;
-                Dockerfile|requirements.txt|.dockerignore) api=1 ;;
-                app|app/*) api=1 ;;
-                nginx/local.conf) ;;
-                nginx|nginx/*) nginx=1 ;;
-              esac
-            done < <(git diff --name-only "$BEFORE" "$AFTER")
-            if [ "$all" = 1 ]; then
-              plan=all
-            elif [ "$api" = 1 ] && [ "$nginx" = 1 ]; then
-              plan=api,nginx
-            elif [ "$api" = 1 ]; then
-              plan=api
-            elif [ "$nginx" = 1 ]; then
-              plan=nginx
-            else
-              plan=none
-            fi
-          fi
-          echo "Deploy plan: $plan"
-          echo "plan=$plan" >> "$GITHUB_OUTPUT"
-
       - name: Deploy to VPS
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         env:
           DEPLOY_SHA: ${{ github.sha }}
-          DEPLOY_PLAN: ${{ steps.plan.outputs.plan }}
+          API_IMAGE: ${{ needs.checks.outputs.image }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          command_timeout: 45m
-          envs: DEPLOY_SHA,DEPLOY_PLAN
+          # Ключ хоста проверяется: подменённый сервер деплой не получит.
+          fingerprint: ${{ secrets.SSH_FINGERPRINT }}
+          command_timeout: 20m
+          envs: DEPLOY_SHA,API_IMAGE
           script: |
             set -euo pipefail
-            case "$DEPLOY_PLAN" in
-              none|api|nginx|api,nginx|all) ;;
-              *) echo "unknown plan: $DEPLOY_PLAN" >&2; exit 1 ;;
-            esac
             if ! printf '%s' "$DEPLOY_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
               echo "bad sha" >&2
               exit 1
             fi
             cd ~/app/aboutme
+            prev_sha="$(git rev-parse HEAD)"
             git fetch origin main
             git checkout -f -B main "$DEPLOY_SHA"
-            echo "checked out $DEPLOY_SHA plan=$DEPLOY_PLAN"
+            echo "checked out $DEPLOY_SHA (was $prev_sha)"
+            # Копия скрипта: при откате git checkout может поменять файл в рабочей копии.
+            runner="$(mktemp)"
+            trap 'rm -f "$runner"' EXIT
+            cp deploy/deploy.sh "$runner"
+            bash "$runner" "$API_IMAGE" "$prev_sha"
 
-            reload_nginx() {
-              docker compose exec -T nginx nginx -s reload
-            }
-
-            wait_api() {
-              local i cid status
-              for i in $(seq 1 40); do
-                cid="$(docker compose ps -q api || true)"
-                if [ -n "$cid" ]; then
-                  status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid")"
-                  if [ "$status" = healthy ]; then
-                    echo "api healthy"
-                    return 0
-                  fi
-                fi
-                sleep 3
-              done
-              docker compose ps
-              docker compose logs --tail 80 api
-              return 1
-            }
-
-            case "$DEPLOY_PLAN" in
-              none)
-                docker compose ps
-                ;;
-              api)
-                docker compose up -d --build --no-deps api
-                wait_api
-                reload_nginx
-                ;;
-              nginx)
-                docker compose up -d --no-deps nginx
-                reload_nginx
-                ;;
-              api,nginx)
-                docker compose up -d --build --no-deps api
-                wait_api
-                docker compose up -d --no-deps nginx
-                reload_nginx
-                ;;
-              all)
-                docker compose up -d --build
-                wait_api
-                reload_nginx
-                ;;
-            esac
-            docker compose ps
+      # Ещё одна проверка снаружи: DNS, сертификат и nginx глазами посетителя.
+      - name: Check the live site
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 10); do
+            if body="$(curl -fsS --max-time 10 https://koppa0.dev/api/health)" &&
+              [[ "$body" == *'"status":"ok"'* ]] &&
+              curl -fsS --max-time 10 -o /dev/null https://koppa0.dev/; then
+              echo "live site ok"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "koppa0.dev does not answer after deploy" >&2
+          exit 1
