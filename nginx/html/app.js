@@ -36,6 +36,7 @@ let selectedProject = 0;
 let physicsToken = 0;
 let physicsState = null;
 let physicsVisible = false;
+let physicsOnScreen = true;
 let matterPromise = null;
 let player = null;
 let statusKey = null;
@@ -714,8 +715,8 @@ function stopPhysics() {
     return;
   }
   const Matter = window.Matter;
-  Matter.Render.stop(state.render);
-  Matter.Runner.stop(state.runner);
+  window.cancelAnimationFrame(state.frame);
+  state.frame = 0;
   Matter.Composite.clear(state.engine.world, false);
   Matter.Engine.clear(state.engine);
   if (state.render.canvas) {
@@ -734,7 +735,8 @@ function mountPhysics(Matter, items) {
   section.classList.add("is-physics");
   const width = worldEl.clientWidth || 640;
   const height = worldEl.clientHeight || 280;
-  const engine = Matter.Engine.create();
+  // Уснувшие капсулы не считаются, а когда спят все — цикл кадров останавливается.
+  const engine = Matter.Engine.create({ enableSleeping: true });
   engine.gravity.y = 1;
   const ratio = Math.min(window.devicePixelRatio || 1, 2);
   const render = Matter.Render.create({
@@ -784,6 +786,8 @@ function mountPhysics(Matter, items) {
       frictionAir: 0.02,
       // Бесконечная инерция: капсула не вращается, надпись всегда горизонтальная.
       inertia: Infinity,
+      // ~0.6 с покоя на 60 шагах в секунду, и капсула засыпает.
+      sleepThreshold: 36,
       label: item.name,
       render: { fillStyle: paint.fill, strokeStyle: paint.fill, lineWidth: 0 },
     });
@@ -802,6 +806,10 @@ function mountPhysics(Matter, items) {
   }
   // Курсор ушёл с холста — отпускаем капсулу, иначе она «прилипает» к мыши.
   render.canvas.addEventListener("mouseleave", (event) => mouse.mouseup(event));
+  // Пока цикл стоит, MouseConstraint не обновляется: нажатие на холст будит его,
+  // и уже на следующем шаге капсулу можно тянуть.
+  render.canvas.addEventListener("mousedown", () => wakePhysics());
+  render.canvas.addEventListener("touchstart", () => wakePhysics(), { passive: true });
   const mouseConstraint = Matter.MouseConstraint.create(engine, {
     mouse,
     constraint: { stiffness: 0.2, render: { visible: false } },
@@ -834,10 +842,79 @@ function mountPhysics(Matter, items) {
     context.restore();
   });
 
-  const runner = Matter.Runner.create();
-  Matter.Runner.run(runner, engine);
-  Matter.Render.run(render);
-  return { engine, render, runner, bodies, width };
+  return { engine, render, mouse, mouseConstraint, bodies, width, frame: 0, last: 0, acc: 0, frames: 0 };
+}
+
+// --- Свой цикл кадров вместо Runner.run и Render.run ------------------------------
+// Шаг физики фиксированный, 1000/60 мс, через аккумулятор: на экранах 120–144 Гц
+// капсулы не ускоряются. Цикл живёт, только пока есть что считать или рисовать.
+
+const PHYSICS_STEP = 1000 / 60;
+
+function physicsBusy(state) {
+  if (state.mouseConstraint.body || state.mouse.button === 0) {
+    return true;
+  }
+  const now = performance.now();
+  for (const body of state.bodies) {
+    const paint = body.plugin.skill;
+    if (!body.isSleeping || (paint.started && now - paint.started < RECOLOR_MS)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function physicsCanRun() {
+  return physicsOnScreen && !document.hidden;
+}
+
+function physicsTick(now) {
+  const state = physicsState;
+  if (!state) {
+    return;
+  }
+  state.frame = 0;
+  state.frames += 1;
+  const Matter = window.Matter;
+  // Первый кадр после паузы только рисует: иначе накопленное время дало бы рывок.
+  const delta = state.last ? Math.min(now - state.last, 250) : 0;
+  state.last = now;
+  state.acc += delta;
+  while (state.acc >= PHYSICS_STEP) {
+    Matter.Engine.update(state.engine, PHYSICS_STEP);
+    state.acc -= PHYSICS_STEP;
+  }
+  Matter.Render.world(state.render);
+  if (physicsCanRun() && physicsBusy(state)) {
+    state.frame = window.requestAnimationFrame(physicsTick);
+  } else {
+    state.last = 0;
+    state.acc = 0;
+  }
+}
+
+function wakePhysics(bodiesToo = false) {
+  const state = physicsState;
+  const Matter = window.Matter;
+  if (!state || !Matter) {
+    return;
+  }
+  if (bodiesToo) {
+    for (const body of state.bodies) {
+      Matter.Sleeping.set(body, false);
+    }
+  }
+  if (!state.frame && physicsCanRun()) {
+    state.frame = window.requestAnimationFrame(physicsTick);
+  }
+}
+
+// Один кадр без шага физики: после смены темы или размера, даже если всё спит.
+function drawPhysicsOnce() {
+  if (physicsState && !physicsState.frame && window.Matter) {
+    window.Matter.Render.world(physicsState.render);
+  }
 }
 
 function recolorPhysics() {
@@ -855,6 +932,8 @@ function recolorPhysics() {
     paint.to = next;
     paint.started = now;
   }
+  drawPhysicsOnce();
+  wakePhysics();
 }
 
 function shakeSkills() {
@@ -863,11 +942,13 @@ function shakeSkills() {
     return false;
   }
   for (const body of physicsState.bodies) {
+    Matter.Sleeping.set(body, false);
     Matter.Body.setVelocity(body, {
       x: (Math.random() - 0.5) * 14,
       y: -8 - Math.random() * 10,
     });
   }
+  wakePhysics();
   return true;
 }
 
@@ -959,6 +1040,7 @@ async function syncSkills() {
     }
     stopPhysics();
     physicsState = mountPhysics(Matter, skillItems);
+    wakePhysics();
     trailInvalidate();
   } catch (err) {
     console.error(err);
@@ -986,6 +1068,20 @@ function watchSkills() {
     { rootMargin: "0px 0px -20% 0px" },
   );
   observer.observe(section);
+
+  // А этот наблюдатель живёт всегда: за экраном цикл кадров стоит.
+  const pause = new IntersectionObserver((entries) => {
+    physicsOnScreen = entries[entries.length - 1].isIntersecting;
+    if (physicsOnScreen && physicsState && physicsBusy(physicsState)) {
+      wakePhysics();
+    }
+  });
+  pause.observe(section);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && physicsState && physicsBusy(physicsState)) {
+      wakePhysics();
+    }
+  });
 
   let resizeTimer = 0;
   window.addEventListener("resize", () => {
