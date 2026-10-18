@@ -1,0 +1,9 @@
+KoppaMonoVF.subset.woff2 is a modified version of Monaspace Neon 1.400
+(https://github.com/githubnext/monaspace, file "Monaspace Neon Var.woff2"
+from monaspace-webfont-variable-v1.400.zip).
+
+Changes: subset to ASCII, basic Cyrillic and the punctuation, arrows and
+symbols the site uses, with fontTools pyftsubset; OpenType features and all
+variation axes kept. Because "Monaspace" and "Neon" are Reserved Font Names,
+the family is renamed to "Koppa Mono" as required by the SIL Open Font
+License 1.1 (see OFL.txt). Copyright and license notices are unchanged.

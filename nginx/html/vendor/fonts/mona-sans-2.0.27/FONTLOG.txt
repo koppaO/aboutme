@@ -1,0 +1,9 @@
+KoppaSansVF.subset.woff2 is a modified version of Mona Sans 2.0.27
+(https://github.com/github/mona-sans, file MonaSansVF[wdth,opsz,wght].woff2
+from mona-sans-webfonts-v2.0.27.zip).
+
+Changes: subset to Latin, Latin-1, general punctuation, arrows and geometric
+shapes with fontTools pyftsubset; stylistic sets dropped; all variation axes
+kept. Because "Mona" is a Reserved Font Name, the family is renamed to
+"Koppa Sans" as required by the SIL Open Font License 1.1 (see OFL.txt).
+Copyright and license notices are unchanged.

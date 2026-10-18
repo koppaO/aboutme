@@ -235,7 +235,7 @@ function updatePlayerLabels() {
     return;
   }
   const playing = !player.audio.paused && !player.audio.ended;
-  player.icon.textContent = playing ? "❚❚" : "▶";
+  player.icon.textContent = playing ? "⏸" : "▶";
   player.word.textContent = t(playing ? "player.pause" : "player.play");
   player.button.setAttribute("aria-label", t(playing ? "player.pauseAria" : "player.playAria", { title: player.track.title }));
   player.error.textContent = t("player.error");
@@ -292,7 +292,7 @@ function renderPlayer(raw) {
   artist.hidden = !track.artist;
   const button = el("button", "play-btn");
   button.type = "button";
-  const icon = el("span", null);
+  const icon = el("span", "play-icon");
   icon.setAttribute("aria-hidden", "true");
   const word = el("span", null);
   button.append(icon, word);
@@ -586,7 +586,7 @@ function renderProjects(payload) {
 
 // --- Скиллы: капсулы на Matter.js -------------------------------------------
 
-const CAPSULE_FONT = '600 15px "Mona Sans", "Onest", "Segoe UI", system-ui, sans-serif';
+const CAPSULE_FONT = '600 15px "Koppa Sans", "Onest", "Segoe UI", system-ui, sans-serif';
 const SKILL_KINDS = ["language", "framework", "database", "infra", "tool"];
 const SKILL_LIMIT = 40;
 const RECOLOR_MS = 260;
@@ -1330,7 +1330,7 @@ function startMatrix(onExit) {
   let frame = 0;
   let lastStep = 0;
 
-  context.font = `500 ${SIZE - 2}px "Monaspace Neon", ui-monospace, Consolas, monospace`;
+  context.font = `500 ${SIZE - 2}px "Koppa Mono", ui-monospace, Consolas, monospace`;
   context.textAlign = "center";
 
   function tick(now) {
@@ -1394,7 +1394,7 @@ function startParty() {
       ch: randomGlyph(),
     };
   });
-  context.font = `700 18px "Monaspace Neon", ui-monospace, Consolas, monospace`;
+  context.font = `700 18px "Koppa Mono", ui-monospace, Consolas, monospace`;
   context.textAlign = "center";
   context.textBaseline = "middle";
 

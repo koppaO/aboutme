@@ -1,0 +1,4 @@
+OnestVF.subset.woff2 is a subset of Onest 2.001
+(https://github.com/simpals/onest, file Onest[wght].woff2 from onest-2.001.zip)
+reduced to basic Cyrillic with fontTools pyftsubset. Onest has no Reserved
+Font Name, so the family name is unchanged (see OFL.txt).
