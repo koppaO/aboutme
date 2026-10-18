@@ -1,0 +1,66 @@
+# Обновления версий раз в неделю, один PR на экосистему.
+# Срочные security-обновления Dependabot присылает сразу, вне расписания.
+# cooldown: новый релиз ждёт неделю, прежде чем попасть в PR, —
+# за это время скомпрометированный релиз обычно успевают отозвать.
+
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      python:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /.github
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      scanners:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      docker:
+        patterns: ["*"]
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    ignore:
+      # Postgres выше 16 только через pg_upgrade: данные лежат в томе pgdata.
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
+    groups:
+      compose:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
