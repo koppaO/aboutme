@@ -1,13 +1,20 @@
+# В образ api попадают только app/, content/, tests/ (для стадии test)
+# и файлы зависимостей. Всё остальное сюда не нужно.
 .git
-.gitignore
+.github
+.claude
+docs
+nginx
+*.md
+
+.env
+.env.*
+
 .venv
 venv
 __pycache__
 .pytest_cache
+.ruff_cache
 .python-version
-.env
-*.md
-nginx
-.github
-docs
-.claude
+
+docker-compose*.yml

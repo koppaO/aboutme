@@ -1,0 +1,17 @@
+# Только настройки инструментов. Пакетом проект не собирается: api ставится
+# в Docker из requirements.txt, где все версии закреплены.
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+# Линтер Python для security.yml: ошибки (E4, E7, E9, F), частые баги (B)
+# и правила безопасности Bandit (S).
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+# В тестах assert — это и есть проверка, а пароли там тестовые.
+"tests/**" = ["S101", "S105", "S106"]

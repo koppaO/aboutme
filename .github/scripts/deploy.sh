@@ -41,7 +41,7 @@ log() {
 pin_api() {
   # Только этот файл задаёт образ api на сервере. В git его нет (.gitignore).
   cat > docker-compose.override.yml <<EOF
-# Пишет deploy/deploy.sh при каждой выкладке. Руками не менять.
+# Пишет .github/scripts/deploy.sh при каждой выкладке. Руками не менять.
 services:
   api:
     image: $1

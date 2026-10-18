@@ -34,7 +34,7 @@ services:
 
   api:
     # На сервере образ только скачивается: точный digest задаёт
-    # docker-compose.override.yml, его пишет deploy/deploy.sh. Тег main здесь —
+    # docker-compose.override.yml, его пишет .github/scripts/deploy.sh. Тег main здесь —
     # запасной вариант, если override ещё нет. Локально образ собирается
     # из исходников (build в docker-compose.local.yml).
     image: ghcr.io/koppao/aboutme-api:main
