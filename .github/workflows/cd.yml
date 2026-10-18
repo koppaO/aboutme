@@ -24,20 +24,24 @@ concurrency:
 jobs:
   checks:
     permissions:
-      contents: read
-      actions: write
-    uses: ./.github/workflows/ci.yml
+      contents: read # checkout
+      actions: write # кэш слоёв Docker, нужен вызываемому ci.yml
+    uses: $/.github/workflows/ci.yml
 
+  # TODO: перенести SSH_* в environment production (только ветка main) и добавить
+  # здесь `environment: production`. Пока это не сделано в настройках GitHub,
+  # zizmor.yml временно разрешает эти секреты вне environment.
   deploy:
     needs: checks
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: read # checkout и diff для плана выкладки
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Choose services
         id: plan

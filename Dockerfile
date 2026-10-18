@@ -14,15 +14,20 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY content ./content
 
-USER appuser
+# Числовой UID однозначен и внутри контейнера, и на хосте.
+USER 10001:10001
 
 FROM base AS test
-USER root
+# Root нужен только чтобы поставить dev-зависимости.
+USER 0
 COPY requirements-dev.txt .
 RUN pip install --no-cache-dir -r requirements-dev.txt
 COPY tests ./tests
 COPY pytest.ini .
-RUN pytest
+# Тесты идут от того же непривилегированного пользователя, что и прод.
+# Кэш pytest выключен: писать в /app этому пользователю нельзя.
+USER 10001:10001
+RUN pytest -p no:cacheprovider
 
 FROM base
 ENV PORT=8080

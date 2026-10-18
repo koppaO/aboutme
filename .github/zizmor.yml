@@ -1,0 +1,10 @@
+rules:
+  secrets-outside-env:
+    config:
+      # ВРЕМЕННО. Секреты деплоя пока лежат в секретах репозитория. Когда их
+      # перенесут в environment production (только ветка main) и в cd.yml
+      # появится `environment: production`, этот список нужно удалить.
+      allow:
+        - SSH_HOST
+        - SSH_USER
+        - SSH_KEY
