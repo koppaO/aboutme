@@ -1,11 +1,16 @@
-# Проверки. На pull request файл запускается сам.
-# Перед выкладкой его вызывает cd.yml через workflow_call.
+# Проверки и образ api. На pull request файл запускается сам.
+# Перед выкладкой его вызывает cd.yml через workflow_call: тогда проверенный
+# образ публикуется в GHCR, а его digest уходит в cd.yml.
 
 name: ci
 
 on:
   pull_request:
   workflow_call:
+    outputs:
+      image:
+        description: Опубликованный образ api с digest, пусто на pull request
+        value: ${{ jobs.image.outputs.image }}
 
 # Права по умолчанию минимальные, каждый job просит своё сам.
 permissions:
@@ -16,11 +21,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test-and-build:
+  # Один образ на всё: на нём идут тесты, его сканирует Trivy, и ровно он
+  # уходит в GHCR и на сервер. Раньше образ собирался в CI дважды и ещё раз на VPS.
+  image:
     runs-on: ubuntu-latest
     permissions:
       contents: read # checkout
       actions: write # кэш слоёв Docker в GitHub Actions (type=gha)
+      packages: write # push в ghcr.io, только на main
+      id-token: write # подпись аттестаций, только на main
+      attestations: write # аттестации provenance и SBOM, только на main
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+    env:
+      PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -30,7 +44,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - name: Build image and run tests
+      - name: Run tests
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         env:
           DOCKER_BUILD_RECORD_UPLOAD: false
@@ -40,36 +54,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  gitleaks:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read # checkout
-    steps:
-      - name: Check out full history
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Scan for secrets
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-
-  trivy:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read # checkout
-      actions: write # кэш слоёв Docker в GitHub Actions (type=gha)
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
       - name: Build production image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         env:
@@ -77,7 +61,7 @@ jobs:
         with:
           context: .
           load: true
-          tags: aboutme:${{ github.sha }}
+          tags: aboutme-api:scan
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -85,7 +69,7 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
-          image-ref: aboutme:${{ github.sha }}
+          image-ref: aboutme-api:scan
           format: json
           output: trivy-report.json
           scanners: vuln
@@ -97,7 +81,7 @@ jobs:
       - name: Publish Trivy findings
         if: always()
         env:
-          IMAGE_REF: aboutme:${{ github.sha }}
+          IMAGE_REF: aboutme-api:scan
         run: |
           python3 <<'PY'
           import json
@@ -183,3 +167,78 @@ jobs:
           print(summary)
           sys.exit(1 if counts["CRITICAL"] else 0)
           PY
+
+      # Дальше только на main. Если Trivy нашёл CRITICAL, шаг выше упал
+      # и сюда дело не дойдёт: непроверенный образ не публикуется.
+      - name: Generate SBOM
+        if: env.PUBLISH == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: aboutme-api:scan
+          format: cyclonedx
+          output: sbom.cdx.json
+
+      - name: Log in to GHCR
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # Пушится тот самый просканированный образ, а не пересобранный.
+      - name: Push image
+        id: push
+        if: env.PUBLISH == 'true'
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          repo="ghcr.io/${OWNER,,}/aboutme-api"
+          docker tag aboutme-api:scan "$repo:sha-$GITHUB_SHA"
+          docker tag aboutme-api:scan "$repo:main"
+          docker push "$repo:sha-$GITHUB_SHA"
+          docker push "$repo:main"
+          ref="$(docker inspect --format '{{index .RepoDigests 0}}' "$repo:sha-$GITHUB_SHA")"
+          case "$ref" in
+            "$repo@sha256:"*) ;;
+            *) echo "unexpected digest: $ref" >&2; exit 1 ;;
+          esac
+          echo "name=$repo" >> "$GITHUB_OUTPUT"
+          echo "digest=${ref#*@}" >> "$GITHUB_OUTPUT"
+          echo "image=$ref" >> "$GITHUB_OUTPUT"
+          echo "Published $ref" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attest build provenance
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.push.outputs.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest SBOM
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ steps.push.outputs.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: sbom.cdx.json
+          push-to-registry: true
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan for secrets
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
