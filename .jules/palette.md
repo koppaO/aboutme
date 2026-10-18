@@ -1,0 +1,3 @@
+## 2023-10-18 - Tooltips for icon buttons and disabled state for network forms
+**Learning:** Icon-only buttons (like theme toggles) need visual tooltips via the `title` attribute for mouse users, even if they have hidden text for screen readers. Forms that depend on network requests (`fetch`) should disable their submit buttons during loading to prevent double-clicks and provide immediate feedback.
+**Action:** Always add `title` and translate it (via `data-i18n-title`) on icon-only buttons. Disable submit buttons immediately upon form submission and re-enable them in `catch` blocks or on error responses.

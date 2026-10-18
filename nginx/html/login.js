@@ -56,6 +56,9 @@ async function main() {
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+
     const login = document.getElementById("login").value;
     const password = document.getElementById("password").value;
     try {
@@ -68,12 +71,14 @@ async function main() {
       });
       if (!response.ok) {
         showStatus(loginError(response.status));
+        if (submitBtn) submitBtn.disabled = false;
         return;
       }
       window.location.replace(nextTarget());
     } catch (err) {
       showStatus(t("login.noApi"));
       console.error(err);
+      if (submitBtn) submitBtn.disabled = false;
     }
   });
 }
