@@ -484,6 +484,20 @@ def test_spoofed_forwarded_for_does_not_bypass_lockout(monkeypatch) -> None:
     )
     assert response.status_code == 429
 
+def test_spoofed_real_ip_with_comma_does_not_bypass_lockout(monkeypatch) -> None:
+    monkeypatch.setenv("TRUST_PROXY", "1")
+    monkeypatch.setattr(auth, "MAX_FAILURES", 2)
+    assert _login_from("203.0.113.8", login="nope").status_code == 401
+    assert _login_from("203.0.113.8", login="nope").status_code == 401
+    response = client.post(
+        "/login",
+        json={"login": LOGIN, "password": PASSWORD},
+        headers={
+            **ORIGIN,
+            "X-Real-IP": "203.0.113.8, 127.0.0.1",
+        },
+    )
+    assert response.status_code == 429
 
 def test_placeholder_session_secret_cannot_login(monkeypatch) -> None:
     monkeypatch.setenv("SESSION_SECRET", "replace-with-long-random-string")

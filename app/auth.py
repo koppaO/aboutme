@@ -204,8 +204,11 @@ def end_session(request: Request) -> None:
 def client_ip(request: Request) -> str:
     if os.getenv("TRUST_PROXY") == "1":
         real = (request.headers.get("x-real-ip") or "").strip()
-        if real and len(real) <= 64 and "\n" not in real and "\r" not in real and "," not in real:
-            return real
+        if real and "\n" not in real and "\r" not in real:
+            # Extracts the first IP in case of multiple comma-separated IPs
+            first_ip = real.split(",")[0].strip()
+            if first_ip and len(first_ip) <= 64:
+                return first_ip
     if request.client and request.client.host:
         return request.client.host
     return "unknown"
