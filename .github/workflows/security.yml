@@ -34,6 +34,8 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: .github/scanners-requirements.txt
 
       - name: Install scanners
         run: "pip install --require-hashes --only-binary=:all: -r .github/scanners-requirements.txt"
@@ -59,6 +61,8 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: .github/scanners-requirements.txt
 
       - name: Install scanners
         run: "pip install --require-hashes --only-binary=:all: -r .github/scanners-requirements.txt"
@@ -80,6 +84,8 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: .github/scanners-requirements.txt
 
       - name: Install scanners
         run: "pip install --require-hashes --only-binary=:all: -r .github/scanners-requirements.txt"
