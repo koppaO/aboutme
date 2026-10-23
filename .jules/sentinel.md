@@ -1,0 +1,4 @@
+## 2024-05-24 - Unbounded Body Size DoS
+**Vulnerability:** Fast API `request.body()` reads the entire request payload into memory. If an attacker uses chunked transfer encoding and omits the Content-Length header, they can upload an arbitrarily large payload.
+**Learning:** `_read_limited` relied on `request.body()` after checking Content-Length header, exposing a DoS vulnerability via chunked requests since the size limit check after `request.body()` requires the entire payload to reside in memory first.
+**Prevention:** Instead of using `await request.body()`, use `async for chunk in request.stream()` to process the request payload in chunks, tracking its size and aborting early if the limit is exceeded. Store the payload in `request._body` to make `request.json()` succeed after reading the stream.
