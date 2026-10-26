@@ -1,6 +1,6 @@
 # Точные версии, чтобы образ собирался одинаково. Обновлять осознанно:
 # поднять версию, собрать target test, посмотреть отчёт Trivy в CI.
-fastapi==0.143.1
+fastapi==0.149.0
 uvicorn[standard]==0.54.0
 psycopg[binary]==3.3.6
 
@@ -18,9 +18,9 @@ pydantic==2.14.1
 pydantic_core==2.50.1
 python-dotenv==1.2.4
 PyYAML==6.0.3
-starlette==1.8.0
+starlette==1.9.0
 typing-inspection==0.4.4
 typing_extensions==4.16.0
 uvloop==0.23.0
 watchfiles==1.3.0
-websockets==17.2
+websockets==17.3
