@@ -72,6 +72,8 @@ jobs:
       - name: Generate SBOM
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          # Версию Trivy Dependabot не обновляет: поднимать вручную, релиз не моложе двух недель.
+          version: v0.75.0
           scan-type: image
           image-ref: aboutme-api:scan
           format: cyclonedx
@@ -80,6 +82,8 @@ jobs:
       - name: Scan SBOM with Trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          # Версию Trivy Dependabot не обновляет: поднимать вручную, релиз не моложе двух недель.
+          version: v0.75.0
           scan-type: sbom
           scan-ref: sbom.cdx.json
           format: json

@@ -58,6 +58,8 @@ jobs:
       - name: Scan api image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          # Версию Trivy Dependabot не обновляет: поднимать вручную, релиз не моложе двух недель.
+          version: v0.75.0
           scan-type: image
           image-ref: ${{ steps.images.outputs.api }}
           scanners: vuln
@@ -70,6 +72,8 @@ jobs:
         if: always() && steps.images.outcome == 'success'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          # Версию Trivy Dependabot не обновляет: поднимать вручную, релиз не моложе двух недель.
+          version: v0.75.0
           scan-type: image
           image-ref: ${{ steps.images.outputs.nginx }}
           scanners: vuln
@@ -81,8 +85,12 @@ jobs:
         if: always() && steps.images.outcome == 'success'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          # Версию Trivy Dependabot не обновляет: поднимать вручную, релиз не моложе двух недель.
+          version: v0.75.0
           scan-type: image
           image-ref: ${{ steps.images.outputs.postgres }}
+          # Узкие исключения со сроком действия, см. сам файл.
+          trivyignores: .github/trivyignore.yaml
           scanners: vuln
           severity: CRITICAL
           ignore-unfixed: true
@@ -92,6 +100,8 @@ jobs:
         if: always() && steps.images.outcome == 'success'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          # Версию Trivy Dependabot не обновляет: поднимать вручную, релиз не моложе двух недель.
+          version: v0.75.0
           scan-type: config
           scan-ref: .
           severity: CRITICAL,HIGH

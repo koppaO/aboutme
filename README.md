@@ -134,7 +134,7 @@ docker build --target test .
 
 Руками на сервере api обновлять не нужно. Если всё же надо перезапустить стек, хватит `docker compose up -d` в папке проекта: override закрепит тот же образ.
 
-Каждую ночь `nightly-scan.yml` заново проверяет на критичные уязвимости опубликованный образ api, образы nginx и postgres из `docker-compose.yml` и сам Dockerfile. Новые CVE появляются и после выкладки, и о них приходит письмо от GitHub.
+Каждую ночь `nightly-scan.yml` заново проверяет на критичные уязвимости опубликованный образ api, образы nginx и postgres из `docker-compose.yml` и сам Dockerfile. Новые CVE появляются и после выкладки, и о них приходит письмо от GitHub. Если уязвимость в стороннем образе нельзя эксплуатировать у нас, а исправления ещё нет, её можно временно исключить в [`.github/trivyignore.yaml`](.github/trivyignore.yaml): только конкретный CVE и путь, с объяснением и сроком действия.
 
 Отдельно на каждый pull request запускаются `codeql.yml` (анализ кода) и `security.yml` (zizmor, ruff, gixy, `nginx -t`, hadolint). Любая находка блокирует мерж.
 
@@ -159,6 +159,7 @@ nginx/local.conf           nginx для своего компьютера, бе�
 .github/workflows/         CI/CD: проверки, сканеры, выкладка, ночной скан
 .github/scripts/deploy.sh  выкладка на сервере с проверкой и откатом
 .github/dependabot.yml     еженедельные обновления зависимостей
+.github/trivyignore.yaml   временные исключения для Trivy, со сроком
 Dockerfile                 образ api: стадии deps, test и runtime
 docker-compose.yml         стек на сервере: nginx, api, postgres
 docker-compose.local.yml   добавка для своего компьютера: сборка api, порт 8080

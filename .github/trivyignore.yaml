@@ -1,0 +1,15 @@
+# Исключения для Trivy. Каждое — узкое (конкретный CVE и путь), с объяснением
+# и сроком: после expired_at исключение перестаёт действовать, и скан снова
+# станет красным, если проблема никуда не делась.
+
+vulnerabilities:
+  # gosu внутри официального образа postgres собран Go 1.24.6. Уязвимость в
+  # crypto/tls (возобновление TLS-сессии), а gosu с сетью и TLS не работает:
+  # entrypoint вызывает его один раз, чтобы сменить пользователя на postgres.
+  # Исправленный gosu 1.20 вышел 2026-10-25. Когда docker-library пересоберёт
+  # postgres с ним, Dependabot пришлёт новый digest, и это исключение удаляется.
+  - id: CVE-2025-68121
+    paths:
+      - "usr/local/bin/gosu"
+    statement: gosu does not use crypto/tls; the vulnerable code is unreachable.
+    expired_at: 2026-12-31
