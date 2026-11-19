@@ -100,7 +100,7 @@ jobs:
       contents: read # checkout
     env:
       # Тот же образ, что в docker-compose.yml.
-      NGINX_IMAGE: nginx:1.30.6-alpine3.24@sha256:ff8328b4279ec385af48cde9ef486e7165ad74b7065cb3cd86c377384e2e2dd5
+      NGINX_IMAGE: nginx:1.30.7-alpine3.24@sha256:4d1d4ce08432dc7dfe4af762cb224ce6b5273ae878f41e020ea2425d02ea91a4
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
