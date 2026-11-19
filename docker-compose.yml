@@ -71,7 +71,7 @@ services:
   postgres:
     # Мажор 16 менять только через pg_upgrade: данные лежат в pgdata.
     # Debian, не alpine: другая libc меняет сортировку строк и ломает индексы.
-    image: postgres:16.15-trixie@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
+    image: postgres:16.15-trixie@sha256:f9a7b9ebf6f56201f949db745e47bc423c0f0f8294bafe991cc10bf74b029657
     # Только свои три переменные, а не весь .env: SESSION_SECRET и хэш пароля
     # админа базе ни к чему. Значения подставляются из того же .env.
     environment:
